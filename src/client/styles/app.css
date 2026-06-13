@@ -463,6 +463,10 @@ textarea:focus {
   align-items: start;
 }
 
+.imdb-helper {
+  margin: -8px 0 10px;
+}
+
 .suggestion-list {
   display: grid;
   gap: 8px;

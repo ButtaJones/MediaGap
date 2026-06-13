@@ -65,4 +65,4 @@ SABnzbd sends use file upload from the app server, so SAB does not need direct a
 
 ## IMDb Lists
 
-IMDb often blocks server-side URL fetching. If a list URL does not load, open the IMDb page in your browser, export/copy the list page content, and paste the CSV/page text or raw `tt...` IDs into the IMDb list search box.
+IMDb often blocks server-side URL fetching. Paste the IMDb URL first; if IMDb blocks it, open the IMDb page in your browser, press `Command+A` then `Command+C`, and paste that copied page text into the IMDb list search box. Raw `tt...` IDs also work.

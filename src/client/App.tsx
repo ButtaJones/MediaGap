@@ -334,6 +334,12 @@ export function App() {
                 {loading ? "Searching" : "Search"}
               </button>
             </form>
+            {type === "imdb" ? (
+              <p className="imdb-helper muted-line">
+                Paste the IMDb URL first. If IMDb blocks it, open the list page, press Command+A then Command+C, and paste
+                that copied page text here.
+              </p>
+            ) : null}
 
             {(suggestions.length || suggestionsLoading) && query.trim().length >= 2 ? (
               <div className="suggestion-list">
@@ -523,7 +529,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function searchPlaceholder(type: SearchType) {
-  if (type === "imdb") return "Paste an IMDb URL, export CSV, copied page text, or tt IDs";
+  if (type === "imdb") return "Paste an IMDb URL, copied page text, or raw tt IDs";
   if (type === "studio") return "Try A24, Universal, or Toho";
   if (type === "movie") return "Try Heat, Alien, or The Matrix";
   return "Try Tom Hanks, Christopher Nolan, or Pam Grier";

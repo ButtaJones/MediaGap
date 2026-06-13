@@ -1,0 +1,609 @@
+import { Activity, Database, Film, Grid2X2, List, Moon, RefreshCw, Search, Settings, Sun, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { AppSettings, MovieDetails, MovieResult, PlexLibrary, SearchResponse, SearchSuggestion } from "../shared/types";
+import { DownloadStatusBar } from "./components/DownloadStatusBar";
+import { DownloadMonitor } from "./components/DownloadMonitor";
+import { MovieGrid } from "./components/MovieGrid";
+import { MovieDetailsModal } from "./components/MovieDetailsModal";
+import { NzbDrawer } from "./components/NzbDrawer";
+import { SettingsPanel } from "./components/SettingsPanel";
+import { api } from "./lib/api";
+
+const EMPTY_SETTINGS: AppSettings = {
+  plexBaseUrl: "",
+  plexToken: "",
+  tmdbApiKey: "",
+  nzbHydraBaseUrl: "",
+  nzbHydraApiKey: "",
+  defaultQualities: ["1080p"],
+  defaultSources: ["BluRay", "WEB-DL"],
+  downloaderType: "none",
+  downloaderBaseUrl: "",
+  downloaderApiKey: "",
+  downloaderDefaultCategory: "movies",
+  loggingEnabled: true,
+  logPath: "",
+  themeMode: "light",
+  refreshOnStart: false
+};
+
+type SearchType = "person" | "movie" | "studio" | "imdb";
+type MovieSort = "list" | "year" | "title" | "owned" | "missing";
+
+export function App() {
+  const [settings, setSettings] = useState<AppSettings>(EMPTY_SETTINGS);
+  const [stats, setStats] = useState<{ movieCount: number; lastScannedAt: string | null }>({ movieCount: 0, lastScannedAt: null });
+  const [query, setQuery] = useState("");
+  const [type, setType] = useState<SearchType>("person");
+  const [searchResponse, setSearchResponse] = useState<SearchResponse>({ query: "", results: [] });
+  const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [message, setMessage] = useState("");
+  const [selectedMovie, setSelectedMovie] = useState<MovieResult | null>(null);
+  const [detailMovie, setDetailMovie] = useState<MovieResult | null>(null);
+  const [movieDetails, setMovieDetails] = useState<MovieDetails | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [trackerOpen, setTrackerOpen] = useState(false);
+  const [libraries, setLibraries] = useState<PlexLibrary[]>([]);
+  const [selectedLibraryKeys, setSelectedLibraryKeys] = useState<string[]>([]);
+  const [librariesLoading, setLibrariesLoading] = useState(false);
+  const [viewMode, setViewMode] = useState<"poster" | "list">("poster");
+  const [posterSize, setPosterSize] = useState(210);
+  const [moviePage, setMoviePage] = useState(0);
+  const [moviesPerPage, setMoviesPerPage] = useState(25);
+  const [movieSort, setMovieSort] = useState<MovieSort>("year");
+  const [movieSortDirection, setMovieSortDirection] = useState<"asc" | "desc">("asc");
+  const [scanError, setScanError] = useState("");
+  const searchAreaRef = useRef<HTMLDivElement | null>(null);
+
+  const missingCount = useMemo(() => searchResponse.results.filter((movie) => !movie.owned).length, [searchResponse.results]);
+  const ownedCount = searchResponse.results.length - missingCount;
+  const sortedMovies = useMemo(() => {
+    const direction = movieSortDirection === "asc" ? 1 : -1;
+    return [...searchResponse.results].sort((a, b) => {
+      if (movieSort === "title") return a.title.localeCompare(b.title) * direction;
+      if (movieSort === "owned") return (Number(!a.owned) - Number(!b.owned)) * direction;
+      if (movieSort === "missing") return (Number(a.owned) - Number(b.owned)) * direction;
+      if (movieSort === "list") return ((a.listRank ?? 9999) - (b.listRank ?? 9999)) * direction;
+      return ((a.year ?? 9999) - (b.year ?? 9999)) * direction;
+    });
+  }, [movieSort, movieSortDirection, searchResponse.results]);
+  const moviePageCount = Math.max(1, Math.ceil(sortedMovies.length / moviesPerPage));
+  const safeMoviePage = Math.min(moviePage, moviePageCount - 1);
+  const pagedMovies = sortedMovies.slice(safeMoviePage * moviesPerPage, safeMoviePage * moviesPerPage + moviesPerPage);
+  const moviePageStart = pagedMovies.length ? safeMoviePage * moviesPerPage + 1 : 0;
+  const moviePageEnd = safeMoviePage * moviesPerPage + pagedMovies.length;
+
+  useEffect(() => {
+    void bootstrap();
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = settings.themeMode;
+  }, [settings.themeMode]);
+
+  useEffect(() => {
+    setMoviePage(0);
+  }, [moviesPerPage, movieSort, movieSortDirection, searchResponse.results]);
+
+  useEffect(() => {
+    const trimmed = query.trim();
+    if (type === "imdb" || trimmed.length < 2 || !settings.tmdbApiKey) {
+      setSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    setSuggestionsLoading(true);
+    const handle = window.setTimeout(() => {
+      void api
+        .suggest(trimmed, type)
+        .then((response) => {
+          if (!cancelled) setSuggestions(response.suggestions);
+        })
+        .catch(() => {
+          if (!cancelled) setSuggestions([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSuggestionsLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [query, settings.tmdbApiKey, type]);
+
+  useEffect(() => {
+    function handlePointerDown(event: PointerEvent) {
+      if (!searchAreaRef.current?.contains(event.target as Node)) {
+        setSuggestions([]);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
+  }, []);
+
+  async function bootstrap() {
+    try {
+      const [loadedSettings, loadedStats] = await Promise.all([api.settings(), api.stats()]);
+      setSettings(loadedSettings);
+      setStats(loadedStats);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not load app state.");
+    }
+  }
+
+  async function openScanPicker() {
+    setScanOpen(true);
+    setLibrariesLoading(true);
+    setLibraries([]);
+    setScanError("");
+    setMessage("");
+    try {
+      const response = await api.plexLibraries();
+      setLibraries(response.libraries);
+      setSelectedLibraryKeys(response.libraries.map((library) => library.key));
+    } catch (error) {
+      setScanError(error instanceof Error ? error.message : "Could not load Plex libraries.");
+    } finally {
+      setLibrariesLoading(false);
+    }
+  }
+
+  async function scan(sectionKeys = selectedLibraryKeys) {
+    if (!sectionKeys.length) {
+      setMessage("Choose at least one Plex movie library to scan.");
+      return;
+    }
+    setScanning(true);
+    setMessage("");
+    try {
+      const response = await api.scanPlex(sectionKeys);
+      const loadedStats = await api.stats();
+      setStats(loadedStats);
+      setMessage(`Imported ${response.imported} movies from ${response.sections.join(", ") || "Plex"}.`);
+      setScanOpen(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Plex scan failed.");
+    } finally {
+      setScanning(false);
+    }
+  }
+
+  async function runSearch(searchQuery: string, searchType: SearchType) {
+    if (!searchQuery.trim()) return;
+    setQuery(searchQuery);
+    setType(searchType);
+    setSuggestions([]);
+    setLoading(true);
+    setMessage("");
+    try {
+      const response = await api.search(searchQuery.trim(), searchType);
+      setSearchResponse(response);
+      if (searchType === "imdb") setMovieSort("list");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Search failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function search(event?: React.FormEvent) {
+    event?.preventDefault();
+    await runSearch(query, type);
+  }
+
+  async function toggleTheme() {
+    const nextSettings: AppSettings = {
+      ...settings,
+      themeMode: settings.themeMode === "dark" ? "light" : "dark"
+    };
+    setSettings(nextSettings);
+    try {
+      const saved = await api.saveSettings(nextSettings);
+      setSettings(saved);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save theme.");
+    }
+  }
+
+  async function openMovieDetails(movie: MovieResult) {
+    setDetailMovie(movie);
+    setMovieDetails(null);
+    setDetailsError("");
+    setDetailsLoading(true);
+    try {
+      const details = await api.movieDetails(movie.tmdbId);
+      setMovieDetails(details);
+    } catch (error) {
+      setDetailsError(error instanceof Error ? error.message : "Could not load movie details.");
+    } finally {
+      setDetailsLoading(false);
+    }
+  }
+
+  function openNzbSearch(movie: MovieResult) {
+    setSelectedMovie(movie);
+  }
+
+  return (
+    <main>
+      <section className="hero">
+        <nav>
+          <div className="brand-mark">
+            <Film size={22} />
+            <span>Plex Gap Finder</span>
+          </div>
+          <div className="nav-actions">
+            <button className="ghost-button" onClick={toggleTheme} title="Toggle light and dark mode">
+              {settings.themeMode === "dark" ? <Sun size={17} /> : <Moon size={17} />}
+              {settings.themeMode === "dark" ? "Light" : "Dark"}
+            </button>
+            <button className="ghost-button" onClick={() => setTrackerOpen(true)}>
+              <Activity size={17} />
+              Tracker
+            </button>
+            <button className="ghost-button" onClick={() => setSettingsOpen(true)}>
+              <Settings size={17} />
+              Settings
+            </button>
+            <button className="ghost-button" onClick={openScanPicker} disabled={scanning}>
+              <RefreshCw size={17} className={scanning ? "spin" : ""} />
+              {scanning ? "Scanning" : "Scan Plex"}
+            </button>
+          </div>
+        </nav>
+
+        <div className="hero-grid">
+          <div className="hero-copy">
+            <p className="eyebrow">Movies only MVP</p>
+            <h1>Find the films your Plex library is missing.</h1>
+            <p>
+              Search actors, directors, movies, or studios, compare them with Plex, then search NZBHydra for the gaps.
+            </p>
+          </div>
+
+          <div className="stats-strip">
+            <Stat label="Plex movies" value={stats.movieCount.toLocaleString()} />
+            <Stat label="Owned in results" value={ownedCount.toLocaleString()} />
+            <Stat label="Missing in results" value={missingCount.toLocaleString()} />
+            <div className="last-scan">
+              <Database size={18} />
+              {stats.lastScannedAt ? `Last scan ${new Date(stats.lastScannedAt).toLocaleString()}` : "No library scan yet"}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div className="workspace">
+        <section className="panel search-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Discovery</p>
+              <h2>Search and compare</h2>
+            </div>
+            <div className="view-tools">
+              <div className="segmented-control" aria-label="Result view mode">
+                <button className={viewMode === "poster" ? "selected" : ""} onClick={() => setViewMode("poster")} title="Poster view">
+                  <Grid2X2 size={16} />
+                  Posters
+                </button>
+                <button className={viewMode === "list" ? "selected" : ""} onClick={() => setViewMode("list")} title="List view">
+                  <List size={16} />
+                  List
+                </button>
+              </div>
+              <label className="range-control">
+                Poster size
+                <input
+                  type="range"
+                  min="150"
+                  max="300"
+                  step="1"
+                  value={posterSize}
+                  onChange={(event) => setPosterSize(Number(event.target.value))}
+                  onInput={(event) => setPosterSize(Number((event.target as HTMLInputElement).value))}
+                  disabled={viewMode === "list"}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div ref={searchAreaRef}>
+            <form className={type === "imdb" ? "search-bar imdb-search-bar" : "search-bar"} onSubmit={search}>
+              <select value={type} onChange={(event) => setType(event.target.value as SearchType)}>
+                <option value="person">Person</option>
+                <option value="movie">Movie</option>
+                <option value="studio">Studio</option>
+                <option value="imdb">IMDb list</option>
+              </select>
+              {type === "imdb" ? (
+                <textarea value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder(type)} rows={4} />
+              ) : (
+                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder(type)} />
+              )}
+              <button className="primary-button" disabled={loading}>
+                <Search size={18} />
+                {loading ? "Searching" : "Search"}
+              </button>
+            </form>
+
+            {(suggestions.length || suggestionsLoading) && query.trim().length >= 2 ? (
+              <div className="suggestion-list">
+                {suggestionsLoading ? <p className="muted-line">Looking up matches...</p> : null}
+                {suggestions.map((suggestion) => (
+                  <button
+                    className="suggestion-row"
+                    key={`${suggestion.type}-${suggestion.id}`}
+                    onClick={() => void runSearch(suggestion.title, suggestion.type)}
+                  >
+                    <div className="suggestion-image">
+                      {suggestion.imagePath ? <img src={suggestion.imagePath} alt="" /> : <Film size={22} />}
+                    </div>
+                    <div>
+                      <strong>{suggestion.title}</strong>
+                      {suggestion.subtitle ? <span>{suggestion.subtitle}</span> : null}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          {message ? <p className="status-line">{message}</p> : null}
+
+          <ResultControls
+            total={sortedMovies.length}
+            pageStart={moviePageStart}
+            pageEnd={moviePageEnd}
+            page={safeMoviePage}
+            pageCount={moviePageCount}
+            perPage={moviesPerPage}
+            sort={movieSort}
+            direction={movieSortDirection}
+            onPerPage={setMoviesPerPage}
+            onSort={setMovieSort}
+            onDirection={setMovieSortDirection}
+            onPage={setMoviePage}
+          />
+
+          <MovieGrid
+            movies={pagedMovies}
+            viewMode={viewMode}
+            posterSize={posterSize}
+            onSearchNzb={openNzbSearch}
+            onShowDetails={(movie) => void openMovieDetails(movie)}
+          />
+
+          <ResultControls
+            total={sortedMovies.length}
+            pageStart={moviePageStart}
+            pageEnd={moviePageEnd}
+            page={safeMoviePage}
+            pageCount={moviePageCount}
+            perPage={moviesPerPage}
+            sort={movieSort}
+            direction={movieSortDirection}
+            onPerPage={setMoviesPerPage}
+            onSort={setMovieSort}
+            onDirection={setMovieSortDirection}
+            onPage={setMoviePage}
+            compact
+          />
+        </section>
+
+      </div>
+
+      {settingsOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Settings">
+          <div className="modal large-modal">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">App menu</p>
+                <h2>Settings</h2>
+              </div>
+              <button className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Close settings">
+                <X size={20} />
+              </button>
+            </div>
+            <SettingsPanel settings={settings} onSaved={setSettings} />
+          </div>
+        </div>
+      ) : null}
+
+      {scanOpen ? (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Choose Plex libraries">
+          <div className="modal">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Plex scan</p>
+                <h2>Choose libraries</h2>
+              </div>
+              <button className="icon-button" onClick={() => setScanOpen(false)} aria-label="Close library picker">
+                <X size={20} />
+              </button>
+            </div>
+            {librariesLoading ? <p className="status-line">Loading Plex libraries...</p> : null}
+            {scanError ? <p className="error-line">{scanError}</p> : null}
+            {!librariesLoading && !scanError && !libraries.length ? (
+              <p className="muted-line">No Plex movie libraries were found. Check your Plex URL/token in Settings, then try again.</p>
+            ) : null}
+            <div className="library-list">
+              {libraries.map((library) => (
+                <label className="check-row" key={library.key}>
+                  <input
+                    type="checkbox"
+                    checked={selectedLibraryKeys.includes(library.key)}
+                    onChange={(event) => {
+                      setSelectedLibraryKeys((current) =>
+                        event.target.checked ? [...current, library.key] : current.filter((key) => key !== library.key)
+                      );
+                    }}
+                  />
+                  <span>{library.title}</span>
+                </label>
+              ))}
+            </div>
+            <div className="modal-actions">
+              <button className="secondary-button" onClick={() => setSelectedLibraryKeys(libraries.map((library) => library.key))}>
+                Select all
+              </button>
+              <button className="secondary-button" onClick={() => setSelectedLibraryKeys([])}>
+                Clear
+              </button>
+              <button className="primary-button" onClick={() => scan()} disabled={scanning || librariesLoading}>
+                <RefreshCw size={17} className={scanning ? "spin" : ""} />
+                {scanning ? "Scanning" : "Scan selected"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {trackerOpen ? (
+        <div className="drawer-backdrop" role="dialog" aria-modal="true" aria-label="Downloader tracker">
+          <aside className="tracker-drawer">
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">Downloader</p>
+                <h2>Tracker and history</h2>
+              </div>
+              <button className="icon-button" onClick={() => setTrackerOpen(false)} aria-label="Close tracker">
+                <X size={20} />
+              </button>
+            </div>
+            <DownloadMonitor enabled={settings.downloaderType !== "none" && Boolean(settings.downloaderBaseUrl)} showHeading={false} />
+          </aside>
+        </div>
+      ) : null}
+
+      <MovieDetailsModal
+        movie={detailMovie}
+        details={movieDetails}
+        loading={detailsLoading}
+        error={detailsError}
+        onClose={() => {
+          setDetailMovie(null);
+          setMovieDetails(null);
+          setDetailsError("");
+        }}
+        onSearchNzb={(movie) => {
+          openNzbSearch(movie);
+          setDetailMovie(null);
+        }}
+      />
+
+      <NzbDrawer
+        movie={selectedMovie}
+        defaultQualities={settings.defaultQualities}
+        defaultSources={settings.defaultSources}
+        defaultCategory={settings.downloaderDefaultCategory}
+        downloaderEnabled={settings.downloaderType !== "none"}
+        onClose={() => setSelectedMovie(null)}
+      />
+      <DownloadStatusBar enabled={settings.downloaderType !== "none" && Boolean(settings.downloaderBaseUrl)} onOpenTracker={() => setTrackerOpen(true)} />
+    </main>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="stat">
+      <strong>{value}</strong>
+      <span>{label}</span>
+    </div>
+  );
+}
+
+function searchPlaceholder(type: SearchType) {
+  if (type === "imdb") return "Paste an IMDb URL, export CSV, copied page text, or tt IDs";
+  if (type === "studio") return "Try A24, Universal, or Toho";
+  if (type === "movie") return "Try Heat, Alien, or The Matrix";
+  return "Try Tom Hanks, Christopher Nolan, or Pam Grier";
+}
+
+function ResultControls({
+  total,
+  pageStart,
+  pageEnd,
+  page,
+  pageCount,
+  perPage,
+  sort,
+  direction,
+  compact = false,
+  onPerPage,
+  onSort,
+  onDirection,
+  onPage
+}: {
+  total: number;
+  pageStart: number;
+  pageEnd: number;
+  page: number;
+  pageCount: number;
+  perPage: number;
+  sort: MovieSort;
+  direction: "asc" | "desc";
+  compact?: boolean;
+  onPerPage: (value: number) => void;
+  onSort: (value: MovieSort) => void;
+  onDirection: (value: "asc" | "desc") => void;
+  onPage: (value: number) => void;
+}) {
+  if (!total) return null;
+
+  return (
+    <div className={compact ? "result-controls compact" : "result-controls"}>
+      <span>
+        Showing {pageStart}-{pageEnd} of {total}
+      </span>
+      <div className="result-control-fields">
+        <label>
+          Movies
+          <select value={perPage} onChange={(event) => onPerPage(Number(event.target.value))}>
+            <option value={10}>10</option>
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+          </select>
+        </label>
+        <label>
+          Sort
+          <select value={sort} onChange={(event) => onSort(event.target.value as MovieSort)}>
+            <option value="list">List order</option>
+            <option value="year">Year</option>
+            <option value="title">Title</option>
+            <option value="owned">Owned</option>
+            <option value="missing">Missing</option>
+          </select>
+        </label>
+        <label>
+          Order
+          <select value={direction} onChange={(event) => onDirection(event.target.value as "asc" | "desc")}>
+            <option value="asc">Asc</option>
+            <option value="desc">Desc</option>
+          </select>
+        </label>
+      </div>
+      <div className="result-page-actions">
+        <button className="secondary-button" onClick={() => onPage(Math.max(0, page - 1))} disabled={page === 0}>
+          Previous
+        </button>
+        <span>
+          Page {page + 1} of {pageCount}
+        </span>
+        <button className="secondary-button" onClick={() => onPage(Math.min(pageCount - 1, page + 1))} disabled={page >= pageCount - 1}>
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}

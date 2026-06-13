@@ -1,0 +1,10 @@
+services:
+  plex-movie-gap-finder:
+    build: .
+    ports:
+      - "4174:4174"
+    environment:
+      PORT: 4174
+      DATABASE_PATH: /app/data/app.db
+    volumes:
+      - ./data:/app/data

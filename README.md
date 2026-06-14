@@ -1,12 +1,13 @@
-# Plex Movie Gap Finder
+# MediaGap
 
-A local, self-hosted web app for discovering which movies are missing from a Plex server, then searching NZBHydra for releases.
+MediaGap is a local, self-hosted web app for discovering which movies are missing from a Plex server, then searching NZBHydra for releases.
 
 ## What v1 Does
 
 - Connects to Plex with a manual base URL and token.
 - Lets you choose which Plex movie libraries to scan into a local SQLite database.
-- Searches TMDb for people, movies, studios, and IMDb list imports.
+- Searches TMDb for people, movies, and studios.
+- Finds partially complete TMDb movie collections from your Plex library.
 - Compares TMDb movie results with the local Plex scan.
 - Marks movies as owned or missing.
 - Searches NZBHydra for missing movies with quality and source filters.
@@ -63,6 +64,6 @@ Logs are written to `./data/app.log` by default and can be changed in Settings.
 
 SABnzbd sends use file upload from the app server, so SAB does not need direct access to the NZBHydra release URL.
 
-## IMDb Lists
+## Collections
 
-IMDb often blocks server-side URL fetching. Paste the IMDb URL first; if IMDb blocks it, open the IMDb page in your browser, press `Command+A` then `Command+C`, and paste that copied page text into the IMDb list search box. Raw `tt...` IDs also work.
+The Collections view uses owned Plex movies with TMDb IDs to find franchises you have started but have not finished. Refreshing collections caches TMDb collection members in SQLite, then overlays owned/missing status using the same matching and NZBHydra handoff as search results.

@@ -1,13 +1,46 @@
-import { cacheGet, cacheSet, matchMovie } from "../db.js";
-import { normalizeTitle, yearFromDate } from "../services/normalize.js";
+import {
+  cacheGet,
+  cacheSet,
+  listCachedCollections,
+  listMissingCollectionCacheIds,
+  listMissingCollectionMapIds,
+  listOwnedCollectionIds,
+  listPlexMovieTmdbIds,
+  matchMovie,
+  upsertCollectionCache,
+  upsertMovieCollectionMaps
+} from "../db.js";
+import type { CachedCollectionMovie } from "../db.js";
+import { yearFromDate } from "../services/normalize.js";
+import { DISCOVER_COLLECTIONS } from "../seeds/discoverCollections.js";
 import zlib from "node:zlib";
-import type { MovieDetails, MovieResult, SearchSuggestion } from "../../shared/types.js";
+import type {
+  CollectionsRefreshResponse,
+  CollectionsRefreshStatus,
+  CollectionsResponse,
+  MovieDetails,
+  MovieResult,
+  SearchSuggestion
+} from "../../shared/types.js";
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMAGE_BASE = "https://image.tmdb.org/t/p/w342";
 const BACKDROP_BASE = "https://image.tmdb.org/t/p/w780";
 const IMDB_RATINGS_URL = "https://datasets.imdbws.com/title.ratings.tsv.gz";
 let imdbRatingsPromise: Promise<Map<string, { rating: number; votes: number }>> | null = null;
+let collectionRefreshStatus: CollectionsRefreshStatus = {
+  running: false,
+  phase: "idle",
+  checkedMovies: 0,
+  totalMovies: 0,
+  fetchedCollections: 0,
+  totalCollections: 0,
+  skippedItems: 0,
+  message: "Collection refresh has not run yet.",
+  startedAt: null,
+  finishedAt: null
+};
+let collectionRefreshPromise: Promise<CollectionsRefreshResponse> | null = null;
 
 interface TmdbMovie {
   id: number;
@@ -27,10 +60,22 @@ interface TmdbMovieDetails extends TmdbMovie {
   genres?: Array<{ id: number; name: string }>;
   backdrop_path?: string | null;
   tagline?: string | null;
+  belongs_to_collection?: TmdbCollectionReference | null;
   credits?: {
     cast?: TmdbCastMember[];
     crew?: TmdbCrewMember[];
   };
+}
+
+interface TmdbCollectionReference {
+  id: number;
+  name: string;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+}
+
+interface TmdbCollection extends TmdbCollectionReference {
+  parts?: TmdbMovie[];
 }
 
 interface TmdbCastMember {
@@ -63,15 +108,6 @@ interface TmdbCompany {
   origin_country?: string;
 }
 
-interface ImdbListEntry {
-  imdbId?: string;
-  title?: string;
-  year?: number | null;
-  imdbRating?: number | null;
-  imdbVotes?: number | null;
-  rank: number;
-}
-
 async function tmdbFetch<T>(apiKey: string, path: string, params: Record<string, string> = {}): Promise<T> {
   const url = new URL(`${TMDB_BASE}${path}`);
   url.searchParams.set("api_key", apiKey);
@@ -81,9 +117,66 @@ async function tmdbFetch<T>(apiKey: string, path: string, params: Record<string,
 
   const response = await fetch(url);
   if (!response.ok) {
-    throw new Error(`TMDb returned ${response.status}`);
+    throw new Error(`TMDb returned ${response.status} for ${path}`);
   }
   return (await response.json()) as T;
+}
+
+function setCollectionRefreshStatus(patch: Partial<CollectionsRefreshStatus>) {
+  collectionRefreshStatus = { ...collectionRefreshStatus, ...patch };
+}
+
+export function getCollectionRefreshStatus(): CollectionsRefreshStatus {
+  return { ...collectionRefreshStatus };
+}
+
+export function startContinueCollectionsRefresh(apiKey: string): CollectionsRefreshStatus {
+  if (collectionRefreshStatus.running && collectionRefreshPromise) {
+    return getCollectionRefreshStatus();
+  }
+
+  const now = new Date().toISOString();
+  collectionRefreshStatus = {
+    running: true,
+    phase: "mapping",
+    checkedMovies: 0,
+    totalMovies: 0,
+    fetchedCollections: 0,
+    totalCollections: 0,
+    skippedItems: 0,
+    message: "Starting collection refresh...",
+    startedAt: now,
+    finishedAt: null
+  };
+
+  collectionRefreshPromise = refreshContinueCollections(apiKey)
+    .then((response) => {
+      setCollectionRefreshStatus({
+        running: false,
+        phase: "complete",
+        checkedMovies: response.checkedMovies,
+        fetchedCollections: response.fetchedCollections,
+        skippedItems: response.skippedItems,
+        message: `Refresh complete. Checked ${response.checkedMovies.toLocaleString()} movies and fetched ${response.fetchedCollections.toLocaleString()} collections.`,
+        finishedAt: new Date().toISOString()
+      });
+      return response;
+    })
+    .catch((error) => {
+      setCollectionRefreshStatus({
+        running: false,
+        phase: "error",
+        message: error instanceof Error ? error.message : "Collection refresh failed.",
+        finishedAt: new Date().toISOString()
+      });
+      throw error;
+    })
+    .finally(() => {
+      collectionRefreshPromise = null;
+    });
+
+  collectionRefreshPromise.catch(() => undefined);
+  return getCollectionRefreshStatus();
 }
 
 function toMovieResult(movie: TmdbMovie): MovieResult | null {
@@ -175,37 +268,8 @@ export async function searchMovies(apiKey: string, query: string): Promise<Movie
   return sortMovies(raw.map(toMovieResult).filter(Boolean) as MovieResult[]);
 }
 
-export async function searchImdbList(apiKey: string, listUrl: string): Promise<MovieResult[]> {
-  const entries = await getImdbEntriesFromInput(listUrl);
-  const found = await findMoviesByImdbEntries(apiKey, entries);
-  const ratings = await getImdbRatings();
-
-  return found
-    .map(({ movie, entry }) => {
-      const result = toMovieResult(movie);
-      if (!result) return null;
-      const imdbId = result.imdbId ?? movie.imdb_id ?? entry.imdbId ?? null;
-      const rating = imdbId ? ratings.get(imdbId) : null;
-      return {
-        ...result,
-        imdbId,
-        imdbRating: rating?.rating ?? entry.imdbRating ?? null,
-        imdbVotes: rating?.votes ?? entry.imdbVotes ?? null,
-        listRank: entry.rank
-      };
-    })
-    .filter(Boolean) as MovieResult[];
-}
-
 export async function getMovieDetails(apiKey: string, tmdbId: number): Promise<MovieDetails> {
-  const key = `tmdb:movie-details:${tmdbId}`;
-  const cached = cacheGet<TmdbMovieDetails>(key);
-  const raw =
-    cached ??
-    (await tmdbFetch<TmdbMovieDetails>(apiKey, `/movie/${tmdbId}`, {
-      append_to_response: "credits,external_ids"
-    }));
-  if (!cached) cacheSet(key, raw);
+  const raw = await getMovieDetailsRaw(apiKey, tmdbId);
 
   const movie = toMovieResult(raw);
   if (!movie) throw new Error("TMDb did not return movie details.");
@@ -241,330 +305,197 @@ export async function getMovieDetails(apiKey: string, tmdbId: number): Promise<M
   };
 }
 
-function parseImdbUrl(value: string) {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error("Paste a full IMDb list or chart URL.");
-  }
-  if (!/(^|\.)imdb\.com$/i.test(url.hostname)) {
-    throw new Error("IMDb list search only supports imdb.com URLs.");
-  }
-  return url;
-}
-
-async function getImdbEntriesFromInput(input: string) {
-  const trimmed = input.trim();
-  const directEntries = extractImdbListEntries(trimmed);
-  if (directEntries.length) return directEntries.slice(0, 250);
-
-  if (!/^https?:\/\//i.test(trimmed)) {
-    throw new Error("Paste an IMDb URL, copied IMDb page text, or raw tt IDs.");
-  }
-
-  const url = parseImdbUrl(trimmed);
-  for (const candidate of imdbCandidateUrls(url)) {
-    const response = await fetch(candidate, {
-      headers: imdbRequestHeaders()
+export function getContinueCollections(): CollectionsResponse {
+  const collectionIds = listOwnedCollectionIds();
+  const collections = listCachedCollections(collectionIds)
+    .map(toCollectionSummary)
+    .filter((collection) => collection.ownedCount > 0 && collection.missingCount > 0)
+    .sort((a, b) => {
+      const aRemaining = a.missingCount / Math.max(1, a.totalCount);
+      const bRemaining = b.missingCount / Math.max(1, b.totalCount);
+      return aRemaining - bRemaining || b.ownedCount - a.ownedCount || a.name.localeCompare(b.name);
     });
-    const text = await response.text();
-    if (isBlockedImdbResponse(response, text)) continue;
-    if (!response.ok) continue;
 
-    const entries = extractImdbListEntries(text);
-    if (entries.length) return entries.slice(0, 250);
-  }
-
-  throw new Error(
-    "IMDb blocked direct URL importing. Open that IMDb page in your browser, press Command+A then Command+C, then paste the copied page text here. No CSV export needed."
-  );
+  return { collections };
 }
 
-function imdbRequestHeaders() {
+export function getDiscoverCollections(): CollectionsResponse {
+  const seedIds = getDiscoverCollectionIds();
+  const collections = listCachedCollections(seedIds).map(toCollectionSummary);
+  return { collections };
+}
+
+function toCollectionSummary(collection: ReturnType<typeof listCachedCollections>[number]) {
+  const movies = collection.movies
+    .map((movie) =>
+      matchMovie({
+        title: movie.title,
+        year: yearFromDate(movie.releaseDate),
+        releaseDate: movie.releaseDate,
+        posterPath: movie.posterPath,
+        tmdbId: movie.id,
+        overview: movie.overview,
+        imdbId: null
+      })
+    )
+    .sort((a, b) => (a.year ?? 9999) - (b.year ?? 9999) || a.title.localeCompare(b.title));
+  const ownedCount = movies.filter((movie) => movie.owned).length;
+  const totalCount = movies.length;
   return {
-    "User-Agent":
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
-    Accept: "text/html,application/xhtml+xml,text/csv,*/*",
-    "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-    Referer: "https://www.imdb.com/"
+    id: collection.id,
+    name: collection.name,
+    posterPath: collection.posterPath,
+    backdropPath: collection.backdropPath,
+    ownedCount,
+    missingCount: totalCount - ownedCount,
+    totalCount,
+    updatedAt: collection.updatedAt,
+    movies
   };
 }
 
-function imdbCandidateUrls(url: URL) {
-  const candidates = new Map<string, URL>();
-  const add = (value: string | URL) => {
-    const candidate = new URL(value.toString());
-    candidate.hash = "";
-    candidates.set(candidate.href, candidate);
-  };
-
-  add(url);
-
-  const listMatch = url.pathname.match(/\/list\/(ls\d+)/i);
-  if (listMatch) {
-    const id = listMatch[1];
-    add(`https://www.imdb.com/list/${id}/`);
-    add(`https://www.imdb.com/list/${id}/export`);
-    add(`https://www.imdb.com/list/${id}/export?ref_=ttls_export`);
-  }
-
-  if (/\/chart\/top\/?/i.test(url.pathname)) {
-    add("https://www.imdb.com/chart/top/");
-  }
-
-  return [...candidates.values()];
+function getDiscoverCollectionIds() {
+  return [...new Set(DISCOVER_COLLECTIONS.map((collection) => collection.id))];
 }
 
-function isBlockedImdbResponse(response: Response, text: string) {
-  const wafAction = response.headers.get("x-amzn-waf-action");
-  return (
-    response.status === 202 ||
-    wafAction === "challenge" ||
-    /verify that you're not a robot/i.test(text) ||
-    /captcha/i.test(text)
-  );
-}
+export async function refreshContinueCollections(apiKey: string): Promise<CollectionsRefreshResponse> {
+  const tmdbIds = listPlexMovieTmdbIds();
+  const missingMapIds = listMissingCollectionMapIds(tmdbIds);
+  const maps: Array<{ tmdbId: number; collectionId: number | null; collectionName: string | null }> = [];
+  let checkedMovies = 0;
+  let fetchedCollections = 0;
+  let skippedItems = 0;
 
-async function findMoviesByImdbEntries(apiKey: string, entries: ImdbListEntry[]) {
-  if (!entries.length) throw new Error("No IMDb movie titles were found.");
+  setCollectionRefreshStatus({
+    phase: "mapping",
+    totalMovies: missingMapIds.length,
+    checkedMovies: 0,
+    totalCollections: 0,
+    fetchedCollections: 0,
+    skippedItems: 0,
+    message: missingMapIds.length
+      ? `Checking ${missingMapIds.length.toLocaleString()} owned Plex movies for TMDb collection data...`
+      : "Owned movie collection map is already cached."
+  });
 
-  const movies: Array<{ movie: TmdbMovie; entry: ImdbListEntry }> = [];
-  const concurrency = 6;
-  for (let index = 0; index < entries.length; index += concurrency) {
-    const batch = entries.slice(index, index + concurrency);
-    const found = await Promise.all(batch.map((entry) => findMovieByImdbEntry(apiKey, entry)));
-    for (let batchIndex = 0; batchIndex < found.length; batchIndex += 1) {
-      const movie = found[batchIndex];
-      if (movie) {
-        movies.push({
-          movie,
-          entry: batch[batchIndex]
-        });
+  for (const batch of chunks(missingMapIds, 8)) {
+    const details = await Promise.allSettled(
+      batch.map(async (tmdbId) => {
+        const movie = await getMovieDetailsRaw(apiKey, tmdbId);
+        return { tmdbId, collection: movie.belongs_to_collection ?? null };
+      })
+    );
+    for (const detail of details) {
+      checkedMovies += 1;
+      if (detail.status === "rejected") {
+        skippedItems += 1;
+        continue;
+      }
+      maps.push({
+        tmdbId: detail.value.tmdbId,
+        collectionId: detail.value.collection?.id ?? null,
+        collectionName: detail.value.collection?.name ?? null
+      });
+    }
+    upsertMovieCollectionMaps(maps.splice(0));
+    setCollectionRefreshStatus({
+      checkedMovies,
+      skippedItems,
+      message: `Checked ${checkedMovies.toLocaleString()} of ${missingMapIds.length.toLocaleString()} owned movies for collection data.`
+    });
+  }
+
+  upsertMovieCollectionMaps(maps);
+
+  const collectionIds = [...new Set([...listOwnedCollectionIds(), ...getDiscoverCollectionIds()])];
+  const missingCollectionIds = listMissingCollectionCacheIds(collectionIds);
+  setCollectionRefreshStatus({
+    phase: "collections",
+    totalCollections: missingCollectionIds.length,
+    fetchedCollections: 0,
+    skippedItems,
+    message: missingCollectionIds.length
+      ? `Fetching ${missingCollectionIds.length.toLocaleString()} TMDb collection${missingCollectionIds.length === 1 ? "" : "s"}...`
+      : "TMDb collection cache is already current."
+  });
+  for (const batch of chunks(missingCollectionIds, 3)) {
+    const results = await Promise.allSettled(batch.map((collectionId) => fetchAndCacheCollection(apiKey, collectionId)));
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        fetchedCollections += 1;
+      } else {
+        skippedItems += 1;
       }
     }
-  }
-  return movies;
-}
-
-async function findMovieByImdbEntry(apiKey: string, entry: ImdbListEntry) {
-  if (entry.imdbId) {
-    const movie = await findMovieByImdbId(apiKey, entry.imdbId);
-    if (movie) return { ...movie, imdb_id: entry.imdbId };
-  }
-  if (entry.title) {
-    return findMovieByTitleYear(apiKey, entry.title, entry.year ?? null);
-  }
-  return null;
-}
-
-async function findMovieByTitleYear(apiKey: string, title: string, year: number | null) {
-  const key = `tmdb:find-title-year:${normalizeTitle(title)}:${year ?? ""}`;
-  const cached = cacheGet<TmdbMovie | null>(key);
-  if (cached !== null) return cached;
-
-  const withYear =
-    year ?
-      (
-        await tmdbFetch<{ results: TmdbMovie[] }>(apiKey, "/search/movie", {
-          query: title,
-          include_adult: "false",
-          primary_release_year: String(year),
-          year: String(year)
-        })
-      ).results
-    : [];
-  const fallback =
-    withYear.length || !year
-      ? withYear
-      : (
-          await tmdbFetch<{ results: TmdbMovie[] }>(apiKey, "/search/movie", {
-            query: title,
-            include_adult: "false"
-          })
-        ).results;
-  const movie = pickBestTitleMatch(fallback, title, year);
-  cacheSet(key, movie);
-  return movie;
-}
-
-function pickBestTitleMatch(movies: TmdbMovie[], title: string, year: number | null) {
-  const normalized = normalizeTitle(title);
-  const scored = movies
-    .map((movie) => {
-      const candidateTitle = normalizeTitle(movie.title ?? movie.name ?? "");
-      const candidateYear = yearFromDate(movie.release_date ?? movie.first_air_date ?? null);
-      let score = 0;
-      if (candidateTitle === normalized) score += 100;
-      else if (candidateTitle.includes(normalized) || normalized.includes(candidateTitle)) score += 55;
-      if (year && candidateYear === year) score += 35;
-      else if (year && candidateYear && Math.abs(candidateYear - year) === 1) score += 15;
-      score += Math.min(movie.popularity ?? 0, 50) / 10;
-      return { movie, score };
-    })
-    .sort((a, b) => b.score - a.score);
-
-  return scored[0]?.score >= 55 ? scored[0].movie : null;
-}
-
-export function extractImdbListEntries(input: string): ImdbListEntry[] {
-  const directIds = extractImdbTitleIds(input);
-  if (directIds.length) {
-    return directIds.map((imdbId, index) => ({ imdbId, rank: index + 1 }));
-  }
-
-  const lines = toPlainText(input)
-    .split(/\r?\n/)
-    .map(cleanImdbLine)
-    .filter(Boolean);
-  const entries: ImdbListEntry[] = [];
-  const seen = new Set<string>();
-  const hasRankedLines = lines.some((line) => /^(?:#\s*)?\d{1,4}[.)]\s+/.test(line));
-
-  for (let index = 0; index < lines.length && entries.length < 250; index += 1) {
-    const nearby = lines.slice(index + 1, index + 8);
-    const parsed = parseRankedImdbLine(lines[index], nearby) ?? (hasRankedLines ? null : parseUnrankedImdbLine(lines[index], nearby, entries.length + 1));
-    if (!parsed) continue;
-
-    const key = `${normalizeTitle(parsed.title ?? "")}:${parsed.year ?? ""}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    entries.push(parsed);
-  }
-
-  return entries;
-}
-
-function parseRankedImdbLine(line: string, nearby: string[]): ImdbListEntry | null {
-  const match = line.match(/^(?:#\s*)?(\d{1,4})[.)]\s+(.+)$/);
-  if (!match) return null;
-  return parseTitleEntry(match[2], nearby, Number(match[1]));
-}
-
-function parseUnrankedImdbLine(line: string, nearby: string[], rank: number): ImdbListEntry | null {
-  if (!looksLikeTitleLine(line)) return null;
-  return parseTitleEntry(line, nearby, rank);
-}
-
-function parseTitleEntry(rawTitle: string, nearby: string[], rank: number): ImdbListEntry | null {
-  const { title, year } = splitTitleAndYear(rawTitle, nearby);
-  if (!title || !looksLikeTitleLine(title)) return null;
-  if (!year) return null;
-
-  return {
-    title,
-    year,
-    imdbRating: findNearbyRating(nearby),
-    imdbVotes: findNearbyVotes(nearby),
-    rank
-  };
-}
-
-function splitTitleAndYear(rawTitle: string, nearby: string[]) {
-  const compact = cleanImdbLine(rawTitle);
-  const parenthesizedYear = compact.match(/^(.+?)\s*\(((?:18|19|20)\d{2})\)/);
-  if (parenthesizedYear) {
-    return { title: cleanTitleCandidate(parenthesizedYear[1]), year: Number(parenthesizedYear[2]) };
-  }
-
-  const inlineYear = compact.match(/^(.+?)\s+((?:18|19|20)\d{2})(?:\b|$)/);
-  if (inlineYear) {
-    return { title: cleanTitleCandidate(inlineYear[1]), year: Number(inlineYear[2]) };
+    setCollectionRefreshStatus({
+      fetchedCollections,
+      skippedItems,
+      message: `Fetched ${fetchedCollections.toLocaleString()} of ${missingCollectionIds.length.toLocaleString()} TMDb collections.`
+    });
   }
 
   return {
-    title: cleanTitleCandidate(compact),
-    year: findNearbyYear(nearby)
+    ...getContinueCollections(),
+    checkedMovies,
+    fetchedCollections,
+    skippedItems
   };
 }
 
-function findNearbyYear(lines: string[]) {
-  for (const line of lines.slice(0, 4)) {
-    const match = line.match(/\b((?:18|19|20)\d{2})\b/);
-    if (match) return Number(match[1]);
-  }
-  return null;
-}
+async function getMovieDetailsRaw(apiKey: string, tmdbId: number): Promise<TmdbMovieDetails> {
+  const key = `tmdb:movie-details:${tmdbId}`;
+  const cached = cacheGet<TmdbMovieDetails>(key);
+  if (cached) return cached;
 
-function findNearbyRating(lines: string[]) {
-  for (const line of lines.slice(0, 6)) {
-    const match = line.match(/^(?:IMDb\s*)?([1-9](?:\.\d)?|10(?:\.0)?)(?:\s*\/\s*10)?(?:\s|$|\()/i);
-    if (match) return Number(match[1]);
-  }
-  return null;
-}
-
-function findNearbyVotes(lines: string[]) {
-  for (const line of lines.slice(0, 6)) {
-    const match = line.match(/\(([\d,.]+)\s*([KMB]?)\)/i);
-    if (!match) continue;
-    const base = Number(match[1].replace(/,/g, ""));
-    const multiplier = match[2].toUpperCase() === "B" ? 1_000_000_000 : match[2].toUpperCase() === "M" ? 1_000_000 : match[2].toUpperCase() === "K" ? 1_000 : 1;
-    return Math.round(base * multiplier);
-  }
-  return null;
-}
-
-function toPlainText(input: string) {
-  return input
-    .replace(/<script[\s\S]*?<\/script>/gi, "\n")
-    .replace(/<style[\s\S]*?<\/style>/gi, "\n")
-    .replace(/<[^>]+>/g, "\n")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&nbsp;/g, " ");
-}
-
-function cleanImdbLine(line: string) {
-  return line
-    .replace(/\u00a0/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function cleanTitleCandidate(title: string) {
-  return cleanImdbLine(title)
-    .replace(/\s+\((?:I|II|III|IV|V|VI|VII|VIII|IX|X)\)$/i, "")
-    .replace(/\s+-\s+IMDb.*$/i, "")
-    .replace(/\s+Rate$/i, "")
-    .replace(/^["']|["']$/g, "")
-    .trim();
-}
-
-function looksLikeTitleLine(line: string) {
-  const normalized = cleanImdbLine(line);
-  if (normalized.length < 2 || normalized.length > 180) return false;
-  if (/^(?:\d{1,4}|(?:18|19|20)\d{2}|[0-9.]+|rate|watchlist)$/i.test(normalized)) return false;
-  if (/^\d+h\b/i.test(normalized) || /^[1-9](?:\.\d)?\s*\(/.test(normalized)) return false;
-  if (/\b(imdb|privacy|help|sign in|create account|sort by|filter|list activity|your watchlist|recently viewed)\b/i.test(normalized)) {
-    return false;
-  }
-  return /[A-Za-z]/.test(normalized);
-}
-
-export function extractImdbTitleIds(html: string) {
-  const ids = new Set<string>();
-  const pattern = /tt\d{7,9}\b/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(html))) {
-    ids.add(match[0]);
-  }
-  return [...ids];
-}
-
-async function findMovieByImdbId(apiKey: string, imdbId: string) {
-  const key = `tmdb:find-imdb:${imdbId}`;
-  const cached = cacheGet<TmdbMovie | null>(key);
-  if (cached !== null) return cached;
-
-  const response = await tmdbFetch<{ movie_results?: TmdbMovie[] }>(apiKey, `/find/${imdbId}`, {
-    external_source: "imdb_id"
+  const raw = await tmdbFetch<TmdbMovieDetails>(apiKey, `/movie/${tmdbId}`, {
+    append_to_response: "credits,external_ids"
   });
-  const movie = response.movie_results?.[0] ?? null;
-  cacheSet(key, movie);
-  return movie;
+  cacheSet(key, raw);
+  return raw;
+}
+
+async function fetchAndCacheCollection(apiKey: string, collectionId: number): Promise<void> {
+  const raw = await tmdbFetch<TmdbCollection>(apiKey, `/collection/${collectionId}`);
+  const partIds = [...new Set((raw.parts ?? []).map((part) => part.id).filter(Boolean))];
+  const movies: CachedCollectionMovie[] = [];
+
+  for (const batch of chunks(partIds, 6)) {
+    const details = await Promise.all(batch.map((tmdbId) => getMovieDetailsRaw(apiKey, tmdbId)));
+    for (const detail of details) {
+      if (!isUsableCollectionMovie(detail)) continue;
+      movies.push({
+        id: detail.id,
+        title: detail.title ?? detail.name ?? "Untitled",
+        releaseDate: detail.release_date ?? detail.first_air_date ?? null,
+        runtime: detail.runtime ?? null,
+        posterPath: detail.poster_path ? `${IMAGE_BASE}${detail.poster_path}` : null,
+        overview: detail.overview
+      });
+    }
+  }
+
+  upsertCollectionCache({
+    id: raw.id,
+    name: raw.name,
+    posterPath: raw.poster_path ? `${IMAGE_BASE}${raw.poster_path}` : null,
+    backdropPath: raw.backdrop_path ? `${BACKDROP_BASE}${raw.backdrop_path}` : null,
+    movies
+  });
+}
+
+function isUsableCollectionMovie(movie: TmdbMovieDetails) {
+  const releaseDate = movie.release_date ?? movie.first_air_date ?? null;
+  if (!releaseDate) return false;
+  if (releaseDate > new Date().toISOString().slice(0, 10)) return false;
+  return Boolean(movie.runtime && movie.runtime > 0);
+}
+
+function chunks<T>(items: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    result.push(items.slice(index, index + size));
+  }
+  return result;
 }
 
 async function getImdbRatings() {

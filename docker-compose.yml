@@ -1,5 +1,5 @@
 services:
-  plex-movie-gap-finder:
+  mediagap:
     build: .
     ports:
       - "4174:4174"

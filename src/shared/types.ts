@@ -1,7 +1,7 @@
 export const QUALITY_FILTERS = ["SD", "720p", "1080p", "4K"] as const;
 export const SOURCE_FILTERS = ["BluRay", "WEB-DL", "WEBRip", "DVD", "REMUX"] as const;
 export const DOWNLOADER_TYPES = ["none", "sabnzbd", "nzbget"] as const;
-export const THEME_MODES = ["light", "dark"] as const;
+export const THEME_MODES = ["light", "dark", "plex"] as const;
 
 export type QualityFilter = (typeof QUALITY_FILTERS)[number];
 export type SourceFilter = (typeof SOURCE_FILTERS)[number];
@@ -30,6 +30,13 @@ export interface ConnectionResult {
   ok: boolean;
   name?: string;
   message: string;
+}
+
+export interface AppMeta {
+  version: string;
+  commit: string | null;
+  dirty: boolean;
+  builtAt: string | null;
 }
 
 export interface PlexMovie {
@@ -84,6 +91,43 @@ export interface MovieDetails extends MovieResult {
 export interface SearchResponse {
   query: string;
   results: MovieResult[];
+}
+
+export interface MovieCollectionSummary {
+  id: number;
+  name: string;
+  posterPath: string | null;
+  backdropPath: string | null;
+  ownedCount: number;
+  missingCount: number;
+  totalCount: number;
+  updatedAt: string | null;
+  movies: MovieResult[];
+}
+
+export interface CollectionsResponse {
+  collections: MovieCollectionSummary[];
+}
+
+export interface CollectionsRefreshResponse extends CollectionsResponse {
+  checkedMovies: number;
+  fetchedCollections: number;
+  skippedItems: number;
+}
+
+export type CollectionsRefreshPhase = "idle" | "mapping" | "collections" | "complete" | "error";
+
+export interface CollectionsRefreshStatus {
+  running: boolean;
+  phase: CollectionsRefreshPhase;
+  checkedMovies: number;
+  totalMovies: number;
+  fetchedCollections: number;
+  totalCollections: number;
+  skippedItems: number;
+  message: string;
+  startedAt: string | null;
+  finishedAt: string | null;
 }
 
 export interface SearchSuggestion {

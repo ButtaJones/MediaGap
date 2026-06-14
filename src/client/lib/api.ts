@@ -1,7 +1,10 @@
 import type {
   AppSettings,
+  AppMeta,
   BulkDownloaderSendResponse,
   ConnectionResult,
+  CollectionsRefreshStatus,
+  CollectionsResponse,
   DownloadHistoryEntry,
   DownloaderStatusResponse,
   DownloaderSendResponse,
@@ -42,6 +45,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  meta: () => request<AppMeta>("/meta"),
   settings: () => request<AppSettings>("/settings"),
   saveSettings: (settings: AppSettings) =>
     request<AppSettings>("/settings", {
@@ -57,10 +61,14 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ sectionKeys })
     }),
-  search: (query: string, type: "person" | "movie" | "studio" | "imdb") =>
+  search: (query: string, type: "person" | "movie" | "studio") =>
     request<SearchResponse>(`/search?q=${encodeURIComponent(query)}&type=${type}`),
   suggest: (query: string, type: "person" | "movie" | "studio") =>
     request<{ query: string; suggestions: SearchSuggestion[] }>(`/suggest?q=${encodeURIComponent(query)}&type=${type}`),
+  collections: () => request<CollectionsResponse>("/collections/continue"),
+  discoverCollections: () => request<CollectionsResponse>("/collections/discover"),
+  refreshCollections: () => request<CollectionsRefreshStatus>("/collections/refresh", { method: "POST" }),
+  collectionsRefreshStatus: () => request<CollectionsRefreshStatus>("/collections/refresh/status"),
   searchNzb: (
     movie: Pick<MovieResult, "title" | "year">,
     qualities: string[],

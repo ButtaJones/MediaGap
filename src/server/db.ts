@@ -6,6 +6,24 @@ import { DEFAULT_LOG_PATH } from "./services/logger.js";
 import { normalizeTitle } from "./services/normalize.js";
 import type { AppSettings, DownloadHistoryEntry, DownloaderType, MovieResult, PlexMovie } from "../shared/types.js";
 
+export interface CachedCollectionMovie {
+  id: number;
+  title: string;
+  releaseDate: string | null;
+  runtime: number | null;
+  posterPath: string | null;
+  overview?: string;
+}
+
+export interface CachedCollection {
+  id: number;
+  name: string;
+  posterPath: string | null;
+  backdropPath: string | null;
+  movies: CachedCollectionMovie[];
+  updatedAt: string;
+}
+
 const DEFAULT_SETTINGS: AppSettings = {
   plexBaseUrl: "",
   plexToken: "",
@@ -69,6 +87,24 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_download_history_created_at ON download_history(created_at DESC);
+
+  CREATE TABLE IF NOT EXISTS movie_collection_map (
+    tmdb_id INTEGER PRIMARY KEY,
+    collection_id INTEGER,
+    collection_name TEXT,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_movie_collection_map_collection_id ON movie_collection_map(collection_id);
+
+  CREATE TABLE IF NOT EXISTS tmdb_collections (
+    collection_id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    poster_path TEXT,
+    backdrop_path TEXT,
+    movies_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
 `);
 
 export function getSettings(): AppSettings {
@@ -90,8 +126,8 @@ export function saveSettings(settings: AppSettings): AppSettings {
 function normalizeSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
-    defaultQualities: settings.defaultQualities.length ? settings.defaultQualities : DEFAULT_SETTINGS.defaultQualities,
-    defaultSources: settings.defaultSources.length ? settings.defaultSources : DEFAULT_SETTINGS.defaultSources
+    defaultQualities: Array.isArray(settings.defaultQualities) ? settings.defaultQualities : DEFAULT_SETTINGS.defaultQualities,
+    defaultSources: Array.isArray(settings.defaultSources) ? settings.defaultSources : DEFAULT_SETTINGS.defaultSources
   };
 }
 
@@ -136,6 +172,111 @@ export function getLibraryStats() {
     movieCount: count.count,
     lastScannedAt: updated.updatedAt
   };
+}
+
+export function listPlexMovieTmdbIds(): number[] {
+  const rows = db
+    .prepare("SELECT DISTINCT tmdb_id AS tmdbId FROM plex_movies WHERE tmdb_id IS NOT NULL ORDER BY tmdb_id")
+    .all() as Array<{ tmdbId: number }>;
+  return rows.map((row) => row.tmdbId);
+}
+
+export function listMissingCollectionMapIds(tmdbIds: number[]): number[] {
+  if (!tmdbIds.length) return [];
+  const existing = db.prepare("SELECT tmdb_id AS tmdbId FROM movie_collection_map").all() as Array<{ tmdbId: number }>;
+  const mapped = new Set(existing.map((row) => row.tmdbId));
+  return tmdbIds.filter((tmdbId) => !mapped.has(tmdbId));
+}
+
+export function upsertMovieCollectionMaps(
+  maps: Array<{ tmdbId: number; collectionId: number | null; collectionName: string | null }>
+): void {
+  if (!maps.length) return;
+  const now = new Date().toISOString();
+  const stmt = db.prepare(`
+    INSERT INTO movie_collection_map (tmdb_id, collection_id, collection_name, updated_at)
+    VALUES (@tmdbId, @collectionId, @collectionName, @updatedAt)
+    ON CONFLICT(tmdb_id) DO UPDATE SET
+      collection_id = excluded.collection_id,
+      collection_name = excluded.collection_name,
+      updated_at = excluded.updated_at
+  `);
+
+  db.exec("BEGIN");
+  try {
+    for (const map of maps) {
+      stmt.run({ ...map, updatedAt: now });
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export function listOwnedCollectionIds(): number[] {
+  const rows = db
+    .prepare("SELECT DISTINCT collection_id AS collectionId FROM movie_collection_map WHERE collection_id IS NOT NULL ORDER BY collection_name")
+    .all() as Array<{ collectionId: number }>;
+  return rows.map((row) => row.collectionId);
+}
+
+export function listMissingCollectionCacheIds(collectionIds: number[]): number[] {
+  if (!collectionIds.length) return [];
+  const existing = db.prepare("SELECT collection_id AS collectionId FROM tmdb_collections").all() as Array<{ collectionId: number }>;
+  const cached = new Set(existing.map((row) => row.collectionId));
+  return collectionIds.filter((collectionId) => !cached.has(collectionId));
+}
+
+export function upsertCollectionCache(collection: Omit<CachedCollection, "updatedAt">): void {
+  db.prepare(
+    `INSERT INTO tmdb_collections (collection_id, name, poster_path, backdrop_path, movies_json, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(collection_id) DO UPDATE SET
+       name = excluded.name,
+       poster_path = excluded.poster_path,
+       backdrop_path = excluded.backdrop_path,
+       movies_json = excluded.movies_json,
+       updated_at = excluded.updated_at`
+  ).run(
+    collection.id,
+    collection.name,
+    collection.posterPath,
+    collection.backdropPath,
+    JSON.stringify(collection.movies),
+    new Date().toISOString()
+  );
+}
+
+export function listCachedCollections(collectionIds: number[]): CachedCollection[] {
+  if (!collectionIds.length) return [];
+  const placeholders = collectionIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT collection_id AS id, name, poster_path AS posterPath, backdrop_path AS backdropPath, movies_json AS moviesJson, updated_at AS updatedAt
+       FROM tmdb_collections
+       WHERE collection_id IN (${placeholders})`
+    )
+    .all(...collectionIds) as Array<{
+    id: number;
+    name: string;
+    posterPath: string | null;
+    backdropPath: string | null;
+    moviesJson: string;
+    updatedAt: string;
+  }>;
+
+  const order = new Map(collectionIds.map((id, index) => [id, index]));
+  return rows
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      posterPath: row.posterPath,
+      backdropPath: row.backdropPath,
+      movies: JSON.parse(row.moviesJson) as CachedCollectionMovie[],
+      updatedAt: row.updatedAt
+    }))
+    .sort((a, b) => (order.get(a.id) ?? 9999) - (order.get(b.id) ?? 9999));
 }
 
 export function matchMovie(movie: Omit<MovieResult, "owned" | "plexRatingKey" | "matchConfidence">): MovieResult {

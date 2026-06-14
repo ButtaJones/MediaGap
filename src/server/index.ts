@@ -35,7 +35,7 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 });
 
 const server = app.listen(config.port, () => {
-  console.log(`Plex Movie Gap Finder listening on http://localhost:${config.port}`);
+  console.log(`MediaGap listening on http://localhost:${config.port}`);
 });
 
 process.on("SIGTERM", () => {

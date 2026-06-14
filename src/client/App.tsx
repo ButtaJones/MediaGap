@@ -1,9 +1,10 @@
 import { Activity, Database, Film, Grid2X2, List, Moon, RefreshCw, Search, Settings, Sun, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AppSettings, MovieDetails, MovieResult, PlexLibrary, SearchResponse, SearchSuggestion } from "../shared/types";
+import type { AppMeta, AppSettings, MovieDetails, MovieResult, PlexLibrary, SearchResponse, SearchSuggestion } from "../shared/types";
 import { DownloadStatusBar } from "./components/DownloadStatusBar";
 import { DownloadMonitor } from "./components/DownloadMonitor";
 import { MovieGrid } from "./components/MovieGrid";
+import { CollectionsView } from "./components/CollectionsView";
 import { MovieDetailsModal } from "./components/MovieDetailsModal";
 import { NzbDrawer } from "./components/NzbDrawer";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -27,11 +28,20 @@ const EMPTY_SETTINGS: AppSettings = {
   refreshOnStart: false
 };
 
-type SearchType = "person" | "movie" | "studio" | "imdb";
+type SearchType = "person" | "movie" | "studio";
 type MovieSort = "list" | "year" | "title" | "owned" | "missing";
+
+const CLIENT_META: AppMeta = {
+  version: __APP_VERSION__,
+  commit: __APP_COMMIT__ || null,
+  dirty: __APP_DIRTY__,
+  builtAt: __APP_BUILT_AT__ || null
+};
 
 export function App() {
   const [settings, setSettings] = useState<AppSettings>(EMPTY_SETTINGS);
+  const [apiMeta, setApiMeta] = useState<AppMeta | null>(null);
+  const [activeView, setActiveView] = useState<"search" | "collections">("search");
   const [stats, setStats] = useState<{ movieCount: number; lastScannedAt: string | null }>({ movieCount: 0, lastScannedAt: null });
   const [query, setQuery] = useState("");
   const [type, setType] = useState<SearchType>("person");
@@ -63,6 +73,7 @@ export function App() {
 
   const missingCount = useMemo(() => searchResponse.results.filter((movie) => !movie.owned).length, [searchResponse.results]);
   const ownedCount = searchResponse.results.length - missingCount;
+  const hasSearchRun = searchResponse.query.trim().length > 0;
   const sortedMovies = useMemo(() => {
     const direction = movieSortDirection === "asc" ? 1 : -1;
     return [...searchResponse.results].sort((a, b) => {
@@ -93,7 +104,7 @@ export function App() {
 
   useEffect(() => {
     const trimmed = query.trim();
-    if (type === "imdb" || trimmed.length < 2 || !settings.tmdbApiKey) {
+    if (trimmed.length < 2 || !settings.tmdbApiKey) {
       setSuggestions([]);
       return;
     }
@@ -131,6 +142,7 @@ export function App() {
   }, []);
 
   async function bootstrap() {
+    void api.meta().then(setApiMeta).catch(() => setApiMeta(null));
     try {
       const [loadedSettings, loadedStats] = await Promise.all([api.settings(), api.stats()]);
       setSettings(loadedSettings);
@@ -187,7 +199,6 @@ export function App() {
     try {
       const response = await api.search(searchQuery.trim(), searchType);
       setSearchResponse(response);
-      if (searchType === "imdb") setMovieSort("list");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Search failed.");
     } finally {
@@ -201,9 +212,10 @@ export function App() {
   }
 
   async function toggleTheme() {
+    const nextTheme = settings.themeMode === "light" ? "dark" : settings.themeMode === "dark" ? "plex" : "light";
     const nextSettings: AppSettings = {
       ...settings,
-      themeMode: settings.themeMode === "dark" ? "light" : "dark"
+      themeMode: nextTheme
     };
     setSettings(nextSettings);
     try {
@@ -235,16 +247,24 @@ export function App() {
 
   return (
     <main>
-      <section className="hero">
+      <section className="app-top">
         <nav>
           <div className="brand-mark">
             <Film size={22} />
-            <span>Plex Gap Finder</span>
+            <span>MediaGap</span>
           </div>
           <div className="nav-actions">
-            <button className="ghost-button" onClick={toggleTheme} title="Toggle light and dark mode">
-              {settings.themeMode === "dark" ? <Sun size={17} /> : <Moon size={17} />}
-              {settings.themeMode === "dark" ? "Light" : "Dark"}
+            <button className={activeView === "search" ? "ghost-button selected" : "ghost-button"} onClick={() => setActiveView("search")}>
+              <Search size={17} />
+              Search
+            </button>
+            <button className={activeView === "collections" ? "ghost-button selected" : "ghost-button"} onClick={() => setActiveView("collections")}>
+              <Grid2X2 size={17} />
+              Collections
+            </button>
+            <button className="ghost-button" onClick={toggleTheme} title="Cycle theme">
+              {settings.themeMode === "light" ? <Moon size={17} /> : settings.themeMode === "dark" ? <Film size={17} /> : <Sun size={17} />}
+              {settings.themeMode === "light" ? "Dark" : settings.themeMode === "dark" ? "Plex" : "Light"}
             </button>
             <button className="ghost-button" onClick={() => setTrackerOpen(true)}>
               <Activity size={17} />
@@ -261,29 +281,26 @@ export function App() {
           </div>
         </nav>
 
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <p className="eyebrow">Movies only MVP</p>
-            <h1>Find the films your Plex library is missing.</h1>
-            <p>
-              Search actors, directors, movies, or studios, compare them with Plex, then search NZBHydra for the gaps.
-            </p>
-          </div>
-
-          <div className="stats-strip">
+        <section className="stats-panel" aria-label="Library stats">
+          <div className={hasSearchRun ? "stats-strip" : "stats-strip stats-strip-single"}>
             <Stat label="Plex movies" value={stats.movieCount.toLocaleString()} />
-            <Stat label="Owned in results" value={ownedCount.toLocaleString()} />
-            <Stat label="Missing in results" value={missingCount.toLocaleString()} />
+            {hasSearchRun ? (
+              <>
+                <Stat label="Owned in results" value={ownedCount.toLocaleString()} />
+                <Stat label="Missing in results" value={missingCount.toLocaleString()} />
+              </>
+            ) : null}
             <div className="last-scan">
               <Database size={18} />
               {stats.lastScannedAt ? `Last scan ${new Date(stats.lastScannedAt).toLocaleString()}` : "No library scan yet"}
             </div>
           </div>
-        </div>
+        </section>
       </section>
 
       <div className="workspace">
-        <section className="panel search-panel">
+        {activeView === "search" ? (
+          <section className="panel search-panel">
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Discovery</p>
@@ -317,29 +334,18 @@ export function App() {
           </div>
 
           <div ref={searchAreaRef}>
-            <form className={type === "imdb" ? "search-bar imdb-search-bar" : "search-bar"} onSubmit={search}>
+            <form className="search-bar" onSubmit={search}>
               <select value={type} onChange={(event) => setType(event.target.value as SearchType)}>
                 <option value="person">Person</option>
                 <option value="movie">Movie</option>
                 <option value="studio">Studio</option>
-                <option value="imdb">IMDb list</option>
               </select>
-              {type === "imdb" ? (
-                <textarea value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder(type)} rows={4} />
-              ) : (
-                <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder(type)} />
-              )}
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={searchPlaceholder(type)} />
               <button className="primary-button" disabled={loading}>
                 <Search size={18} />
                 {loading ? "Searching" : "Search"}
               </button>
             </form>
-            {type === "imdb" ? (
-              <p className="imdb-helper muted-line">
-                Paste the IMDb URL first. If IMDb blocks it, open the list page, press Command+A then Command+C, and paste
-                that copied page text here.
-              </p>
-            ) : null}
 
             {(suggestions.length || suggestionsLoading) && query.trim().length >= 2 ? (
               <div className="suggestion-list">
@@ -403,7 +409,17 @@ export function App() {
             onPage={setMoviePage}
             compact
           />
-        </section>
+          </section>
+        ) : (
+          <CollectionsView
+            viewMode={viewMode}
+            posterSize={posterSize}
+            onViewModeChange={setViewMode}
+            onPosterSizeChange={setPosterSize}
+            onSearchNzb={openNzbSearch}
+            onShowDetails={(movie) => void openMovieDetails(movie)}
+          />
+        )}
 
       </div>
 
@@ -514,9 +530,18 @@ export function App() {
         downloaderEnabled={settings.downloaderType !== "none"}
         onClose={() => setSelectedMovie(null)}
       />
+      <footer className="app-footer" aria-label="App version">
+        <span>Client {formatMeta(CLIENT_META)}</span>
+        <span>{apiMeta ? `API ${formatMeta(apiMeta)}` : "API not detected"}</span>
+      </footer>
       <DownloadStatusBar enabled={settings.downloaderType !== "none" && Boolean(settings.downloaderBaseUrl)} onOpenTracker={() => setTrackerOpen(true)} />
     </main>
   );
+}
+
+function formatMeta(meta: AppMeta) {
+  const commit = meta.commit ? ` ${meta.commit}${meta.dirty ? "-dirty" : ""}` : "";
+  return `v${meta.version}${commit}`;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -529,10 +554,9 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function searchPlaceholder(type: SearchType) {
-  if (type === "imdb") return "Paste an IMDb URL, copied page text, or raw tt IDs";
-  if (type === "studio") return "Try A24, Universal, or Toho";
-  if (type === "movie") return "Try Heat, Alien, or The Matrix";
-  return "Try Tom Hanks, Christopher Nolan, or Pam Grier";
+  if (type === "studio") return "Search studios like A24 or Universal, then compare their movies with Plex";
+  if (type === "movie") return "Search movie titles like Heat, Alien, or The Matrix";
+  return "Search actors or directors, compare with Plex, then find the gaps";
 }
 
 function ResultControls({

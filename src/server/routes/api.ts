@@ -13,18 +13,22 @@ import {
 import { controlDownloader, getDownloaderStatus, sendToDownloader, testDownloaderConnection } from "../integrations/downloader.js";
 import { getMovieSections, scanPlexMovies, testPlexConnection } from "../integrations/plex.js";
 import {
+  getContinueCollections,
+  getCollectionRefreshStatus,
+  getDiscoverCollections,
   getMovieDetails,
-  searchImdbList,
   searchCompanyMovies,
   searchMovies,
   searchPersonCredits,
   searchSuggestions,
+  startContinueCollectionsRefresh,
   testTmdbConnection
 } from "../integrations/tmdb.js";
 import { searchNzbHydra, testNzbHydraConnection } from "../integrations/nzbhydra.js";
 import { appendLog, openLogFolder, readRecentLogs } from "../services/logger.js";
 import { fetchManyNzbs, safeFilename } from "../services/nzb.js";
 import { createZip } from "../services/zip.js";
+import { getAppMeta } from "../services/appMeta.js";
 import { DOWNLOADER_TYPES, QUALITY_FILTERS, SOURCE_FILTERS, THEME_MODES } from "../../shared/types.js";
 
 export const api = Router();
@@ -47,7 +51,7 @@ const settingsSchema = z.object({
   refreshOnStart: z.boolean().default(false)
 });
 
-const searchTypeSchema = z.enum(["person", "movie", "studio", "imdb"]);
+const searchTypeSchema = z.enum(["person", "movie", "studio"]);
 const suggestionTypeSchema = z.enum(["person", "movie", "studio"]);
 
 function requireSettings() {
@@ -58,6 +62,10 @@ function requireSettings() {
 
 api.get("/health", (_req, res) => {
   res.json({ ok: true });
+});
+
+api.get("/meta", (_req, res) => {
+  res.json(getAppMeta());
 });
 
 api.get("/settings", (_req, res) => {
@@ -172,8 +180,6 @@ api.get("/search", async (req, res, next) => {
     const results =
       type === "person"
         ? await searchPersonCredits(settings.tmdbApiKey, query)
-        : type === "imdb"
-          ? await searchImdbList(settings.tmdbApiKey, query)
         : type === "studio"
           ? await searchCompanyMovies(settings.tmdbApiKey, query)
           : await searchMovies(settings.tmdbApiKey, query);
@@ -191,6 +197,48 @@ api.get("/suggest", async (req, res, next) => {
     const type = suggestionTypeSchema.parse(req.query.type ?? "person");
     const suggestions = await searchSuggestions(settings.tmdbApiKey, query, type);
     res.json({ query, suggestions });
+  } catch (error) {
+    next(error);
+  }
+});
+
+api.get("/collections/continue", (_req, res, next) => {
+  try {
+    res.json(getContinueCollections());
+  } catch (error) {
+    next(error);
+  }
+});
+
+api.get("/collections/discover", (_req, res, next) => {
+  try {
+    res.json(getDiscoverCollections());
+  } catch (error) {
+    next(error);
+  }
+});
+
+api.post("/collections/refresh", async (_req, res, next) => {
+  try {
+    const settings = requireSettings();
+    const status = startContinueCollectionsRefresh(settings.tmdbApiKey);
+    appendLog(settings.logPath, settings.loggingEnabled, "info", "Collection refresh started", {
+      phase: status.phase,
+      running: status.running
+    });
+    res.json(status);
+  } catch (error) {
+    const settings = getSettings();
+    appendLog(settings.logPath, settings.loggingEnabled, "error", "Collection refresh could not start", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    next(error);
+  }
+});
+
+api.get("/collections/refresh/status", (_req, res, next) => {
+  try {
+    res.json(getCollectionRefreshStatus());
   } catch (error) {
     next(error);
   }

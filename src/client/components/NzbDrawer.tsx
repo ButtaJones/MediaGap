@@ -3,9 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import { QUALITY_FILTERS, SOURCE_FILTERS, type MovieResult, type NzbResult } from "../../shared/types";
 import { api } from "../lib/api";
 
-const FALLBACK_QUALITIES = ["1080p"];
-const FALLBACK_SOURCES = ["BluRay", "WEB-DL"];
-
 interface NzbDrawerProps {
   movie: MovieResult | null;
   defaultQualities: string[];
@@ -16,8 +13,8 @@ interface NzbDrawerProps {
 }
 
 export function NzbDrawer({ movie, defaultQualities, defaultSources, defaultCategory, downloaderEnabled, onClose }: NzbDrawerProps) {
-  const effectiveDefaultQualities = defaultQualities.length ? defaultQualities : FALLBACK_QUALITIES;
-  const effectiveDefaultSources = defaultSources.length ? defaultSources : FALLBACK_SOURCES;
+  const effectiveDefaultQualities = defaultQualities;
+  const effectiveDefaultSources = defaultSources;
   const [qualities, setQualities] = useState<string[]>(effectiveDefaultQualities);
   const [sources, setSources] = useState<string[]>(effectiveDefaultSources);
   const [results, setResults] = useState<NzbResult[]>([]);

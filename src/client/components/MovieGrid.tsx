@@ -8,15 +8,25 @@ interface MovieGridProps {
   posterSize: number;
   onSearchNzb: (movie: MovieResult) => void;
   onShowDetails: (movie: MovieResult) => void;
+  emptyTitle?: string;
+  emptyDescription?: string;
 }
 
-export function MovieGrid({ movies, viewMode, posterSize, onSearchNzb, onShowDetails }: MovieGridProps) {
+export function MovieGrid({
+  movies,
+  viewMode,
+  posterSize,
+  onSearchNzb,
+  onShowDetails,
+  emptyTitle = "Search a person, movie, or studio",
+  emptyDescription = "Results will appear here with clear owned and missing states."
+}: MovieGridProps) {
   if (!movies.length) {
     return (
       <div className="empty-state">
         <Search size={34} />
-        <h3>Search a person, movie, or studio</h3>
-        <p>Results will appear here with clear owned and missing states.</p>
+        <h3>{emptyTitle}</h3>
+        <p>{emptyDescription}</p>
       </div>
     );
   }

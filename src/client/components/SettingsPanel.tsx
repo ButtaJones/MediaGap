@@ -240,13 +240,14 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
               </button>
             ))}
           </div>
+          <p className="muted-line">Leave all sources off if you only want quality terms in new searches.</p>
         </div>
         <div>
           <h3>Theme</h3>
           <select value={draft.themeMode} onChange={(event) => update("themeMode", event.target.value as AppSettings["themeMode"])}>
             {THEME_MODES.map((theme) => (
               <option value={theme} key={theme}>
-                {theme === "light" ? "Light" : "Dark"}
+                {theme === "light" ? "Light" : theme === "plex" ? "Plex dark" : "Dark"}
               </option>
             ))}
           </select>

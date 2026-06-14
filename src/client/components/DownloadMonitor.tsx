@@ -11,8 +11,11 @@ interface DownloadMonitorProps {
 export function DownloadMonitor({ enabled, showHeading = true }: DownloadMonitorProps) {
   const [status, setStatus] = useState<DownloaderStatusResponse | null>(null);
   const [history, setHistory] = useState<DownloadHistoryEntry[]>([]);
+  const [activeTab, setActiveTab] = useState<"queue" | "history">("queue");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const queueItems = status?.queue ?? [];
+  const downloaderHistoryItems = status?.history ?? [];
 
   useEffect(() => {
     void refresh();
@@ -111,10 +114,22 @@ export function DownloadMonitor({ enabled, showHeading = true }: DownloadMonitor
       {message ? <p className="status-line">{message}</p> : null}
       {!enabled ? <p className="muted-line">Set up SABnzbd or NZBGet in Settings to enable live tracking.</p> : null}
 
-      <div className="tracker-grid">
-        <TrackerColumn title="Active queue" items={status?.queue ?? []} empty="No active downloads." />
-        <TrackerColumn title="Downloader history" items={status?.history ?? []} empty="No downloader history loaded." />
+      <div className="tracker-tabs segmented-control" aria-label="Downloader tracker section">
+        <button className={activeTab === "queue" ? "selected" : ""} onClick={() => setActiveTab("queue")}>
+          Queue
+          <span>{queueItems.length}</span>
+        </button>
+        <button className={activeTab === "history" ? "selected" : ""} onClick={() => setActiveTab("history")}>
+          Downloader history
+          <span>{downloaderHistoryItems.length}</span>
+        </button>
       </div>
+
+      <TrackerColumn
+        title={activeTab === "queue" ? "Active queue" : "Downloader history"}
+        items={activeTab === "queue" ? queueItems : downloaderHistoryItems}
+        empty={activeTab === "queue" ? "No active downloads." : "No downloader history loaded."}
+      />
 
       <div className="local-history">
         <h3>Editable app history</h3>

@@ -74,6 +74,13 @@ nav {
   font-weight: 800;
 }
 
+.brand-logo {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  box-shadow: 0 0 18px rgba(24, 214, 237, 0.24);
+}
+
 .nav-actions {
   gap: 10px;
 }

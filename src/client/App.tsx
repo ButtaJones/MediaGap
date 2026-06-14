@@ -250,7 +250,7 @@ export function App() {
       <section className="app-top">
         <nav>
           <div className="brand-mark">
-            <Film size={22} />
+            <img className="brand-logo" src="/logo.png" alt="" />
             <span>MediaGap</span>
           </div>
           <div className="nav-actions">

@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MediaGap Banner</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1280px;
+        height: 320px;
+        margin: 0;
+        overflow: hidden;
+        background: #080d1c;
+        color: #f8fbff;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body {
+        display: grid;
+        place-items: center;
+      }
+
+      .banner {
+        position: relative;
+        display: grid;
+        grid-template-columns: 176px minmax(0, 1fr);
+        align-items: center;
+        gap: 34px;
+        width: 1280px;
+        height: 320px;
+        padding: 44px 72px;
+        background:
+          radial-gradient(circle at 18% 52%, rgba(24, 214, 237, 0.45), transparent 22%),
+          radial-gradient(circle at 84% 6%, rgba(229, 160, 13, 0.36), transparent 28%),
+          linear-gradient(135deg, #070b17 0%, #10182c 46%, #080d1c 100%);
+      }
+
+      .banner::before,
+      .banner::after {
+        position: absolute;
+        content: "";
+        pointer-events: none;
+      }
+
+      .banner::before {
+        inset: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 28px;
+      }
+
+      .banner::after {
+        right: 88px;
+        bottom: -78px;
+        width: 340px;
+        height: 210px;
+        border-radius: 999px;
+        background: rgba(24, 214, 237, 0.13);
+        filter: blur(12px);
+        transform: rotate(-11deg);
+      }
+
+      img {
+        position: relative;
+        z-index: 1;
+        width: 154px;
+        height: 154px;
+        border-radius: 34px;
+        box-shadow:
+          0 0 42px rgba(24, 214, 237, 0.48),
+          0 24px 72px rgba(0, 0, 0, 0.42);
+      }
+
+      .copy {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        gap: 18px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 78px;
+        line-height: 0.92;
+        letter-spacing: -0.02em;
+      }
+
+      p {
+        max-width: 770px;
+        margin: 0;
+        color: rgba(248, 251, 255, 0.76);
+        font-size: 25px;
+        line-height: 1.32;
+        font-weight: 650;
+      }
+
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      span {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        border: 1px solid rgba(24, 214, 237, 0.34);
+        border-radius: 999px;
+        background: rgba(24, 214, 237, 0.11);
+        color: #a7f6ff;
+        font-size: 14px;
+        font-weight: 850;
+        letter-spacing: 0.08em;
+        padding: 0 15px;
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="banner">
+      <img src="../public/logo.png" alt="" />
+      <section class="copy">
+        <h1>MediaGap</h1>
+        <p>Find the movies your media library is missing, browse the gaps visually, then send releases to your downloader.</p>
+        <div class="chips">
+          <span>Plex</span>
+          <span>TMDb</span>
+          <span>NZBHydra</span>
+          <span>SABnzbd</span>
+          <span>NZBGet</span>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

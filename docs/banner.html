@@ -12,10 +12,10 @@
       html,
       body {
         width: 1280px;
-        height: 320px;
+        height: 720px;
         margin: 0;
         overflow: hidden;
-        background: #080d1c;
+        background: #05080f;
         color: #f8fbff;
         font-family:
           Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -28,17 +28,14 @@
 
       .banner {
         position: relative;
-        display: grid;
-        grid-template-columns: 176px minmax(0, 1fr);
-        align-items: center;
-        gap: 34px;
         width: 1280px;
-        height: 320px;
-        padding: 44px 72px;
+        height: 720px;
+        overflow: hidden;
         background:
-          radial-gradient(circle at 18% 52%, rgba(24, 214, 237, 0.45), transparent 22%),
-          radial-gradient(circle at 84% 6%, rgba(229, 160, 13, 0.36), transparent 28%),
-          linear-gradient(135deg, #070b17 0%, #10182c 46%, #080d1c 100%);
+          radial-gradient(circle at 17% 45%, rgba(24, 214, 237, 0.28), transparent 18%),
+          radial-gradient(circle at 83% 24%, rgba(229, 160, 13, 0.22), transparent 24%),
+          radial-gradient(circle at 62% 92%, rgba(24, 214, 237, 0.13), transparent 28%),
+          linear-gradient(135deg, #04070d 0%, #08111e 43%, #05080f 100%);
       }
 
       .banner::before,
@@ -49,54 +46,83 @@
       }
 
       .banner::before {
-        inset: 18px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        border-radius: 28px;
+        inset: 0;
+        background:
+          linear-gradient(90deg, rgba(0, 0, 0, 0.62), transparent 42%),
+          linear-gradient(0deg, rgba(0, 0, 0, 0.72), transparent 30%);
+        z-index: 3;
       }
 
       .banner::after {
-        right: 88px;
-        bottom: -78px;
-        width: 340px;
-        height: 210px;
+        left: 430px;
+        bottom: 54px;
+        width: 820px;
+        height: 92px;
         border-radius: 999px;
-        background: rgba(24, 214, 237, 0.13);
-        filter: blur(12px);
-        transform: rotate(-11deg);
+        background: rgba(24, 214, 237, 0.16);
+        filter: blur(24px);
+        z-index: 2;
       }
 
-      img {
-        position: relative;
-        z-index: 1;
-        width: 154px;
-        height: 154px;
-        border-radius: 34px;
-        box-shadow:
-          0 0 42px rgba(24, 214, 237, 0.48),
-          0 24px 72px rgba(0, 0, 0, 0.42);
+      .noise {
+        position: absolute;
+        inset: 0;
+        opacity: 0.18;
+        background-image:
+          linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+        background-size: 58px 58px;
+        mask-image: linear-gradient(90deg, transparent, #000 24%, #000 78%, transparent);
       }
 
-      .copy {
-        position: relative;
-        z-index: 1;
+      .brand {
+        position: absolute;
+        left: 72px;
+        top: 206px;
+        z-index: 4;
         display: grid;
-        gap: 18px;
+        gap: 22px;
+        width: 330px;
+      }
+
+      .logo-wrap {
+        display: grid;
+        place-items: center;
+        width: 172px;
+        height: 172px;
+        border-radius: 42px;
+        background:
+          radial-gradient(circle at 50% 50%, rgba(24, 214, 237, 0.28), transparent 64%),
+          rgba(255, 255, 255, 0.03);
+        box-shadow:
+          0 0 54px rgba(24, 214, 237, 0.34),
+          0 34px 80px rgba(0, 0, 0, 0.5);
+      }
+
+      .logo-wrap img {
+        width: 150px;
+        height: 150px;
+        border-radius: 34px;
+        display: block;
+      }
+
+      h1,
+      p {
+        margin: 0;
       }
 
       h1 {
-        margin: 0;
-        font-size: 78px;
-        line-height: 0.92;
-        letter-spacing: -0.02em;
+        font-size: 68px;
+        line-height: 0.96;
+        letter-spacing: 0;
       }
 
       p {
-        max-width: 770px;
-        margin: 0;
+        max-width: 310px;
         color: rgba(248, 251, 255, 0.76);
-        font-size: 25px;
+        font-size: 22px;
         line-height: 1.32;
-        font-weight: 650;
+        font-weight: 700;
       }
 
       .chips {
@@ -105,36 +131,141 @@
         gap: 10px;
       }
 
-      span {
+      .chip {
         display: inline-flex;
+        min-height: 32px;
         align-items: center;
-        min-height: 34px;
-        border: 1px solid rgba(24, 214, 237, 0.34);
+        border: 1px solid rgba(24, 214, 237, 0.28);
         border-radius: 999px;
         background: rgba(24, 214, 237, 0.11);
-        color: #a7f6ff;
-        font-size: 14px;
+        color: #b9f8ff;
+        font-size: 13px;
         font-weight: 850;
-        letter-spacing: 0.08em;
-        padding: 0 15px;
-        text-transform: uppercase;
+        padding: 0 13px;
+      }
+
+      .desktop {
+        position: absolute;
+        right: -72px;
+        top: 38px;
+        z-index: 1;
+        width: 850px;
+        height: 516px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.13);
+        border-radius: 18px;
+        background: #07101e;
+        box-shadow:
+          0 54px 110px rgba(0, 0, 0, 0.72),
+          0 0 0 10px rgba(255, 255, 255, 0.025);
+      }
+
+      .desktop::before {
+        position: absolute;
+        inset: 0;
+        content: "";
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), transparent 28%);
+        z-index: 2;
+        pointer-events: none;
+      }
+
+      .desktop img {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
+        object-position: 50% 0%;
+        opacity: 0.96;
+      }
+
+      .phone {
+        position: absolute;
+        left: 375px;
+        top: 250px;
+        z-index: 4;
+        width: 222px;
+        height: 448px;
+        overflow: hidden;
+        border: 8px solid #0a0e17;
+        border-radius: 38px;
+        background: #07101e;
+        box-shadow:
+          0 42px 88px rgba(0, 0, 0, 0.68),
+          0 0 0 1px rgba(255, 255, 255, 0.24),
+          0 0 44px rgba(24, 214, 237, 0.18);
+      }
+
+      .phone::before {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        z-index: 3;
+        width: 78px;
+        height: 20px;
+        border-radius: 999px;
+        background: #080b12;
+        content: "";
+        transform: translateX(-50%);
+      }
+
+      .phone img {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: cover;
+        object-position: 50% 0%;
+      }
+
+      .preview-strip {
+        position: absolute;
+        right: 0;
+        bottom: 0;
+        z-index: 4;
+        width: 785px;
+        height: 118px;
+        background: linear-gradient(90deg, transparent, rgba(5, 8, 15, 0.9) 18%, rgba(5, 8, 15, 0.98));
+        filter: blur(0.2px);
+      }
+
+      .glow-line {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 112px;
+        z-index: 5;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(24, 214, 237, 0.6), transparent);
+        opacity: 0.72;
       }
     </style>
   </head>
   <body>
-    <main class="banner">
-      <img src="../public/logo.png" alt="" />
-      <section class="copy">
-        <h1>MediaGap</h1>
-        <p>Find the movies your media library is missing, browse the gaps visually, then send releases to your downloader.</p>
-        <div class="chips">
-          <span>Plex</span>
-          <span>TMDb</span>
-          <span>NZBHydra</span>
-          <span>SABnzbd</span>
-          <span>NZBGet</span>
+    <main class="banner" aria-label="MediaGap product banner">
+      <div class="noise"></div>
+
+      <section class="brand">
+        <div class="logo-wrap">
+          <img src="../public/logo.png" alt="" />
+        </div>
+        <div>
+          <h1>MediaGap</h1>
+          <p>Find the movies your library is missing, then search the gaps visually.</p>
+        </div>
+        <div class="chips" aria-label="Integrations">
+          <span class="chip">Plex</span>
+          <span class="chip">TMDb</span>
+          <span class="chip">NZBHydra</span>
         </div>
       </section>
+
+      <figure class="desktop" aria-hidden="true">
+        <img src="screenshot.png" alt="" />
+      </figure>
+      <figure class="phone" aria-hidden="true">
+        <img src="mobile-screenshot.png" alt="" />
+      </figure>
+      <div class="preview-strip"></div>
+      <div class="glow-line"></div>
     </main>
   </body>
 </html>

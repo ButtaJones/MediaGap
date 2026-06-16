@@ -4,7 +4,7 @@
 
 <h1>MediaGap</h1>
 
-<p><strong>Find the movies your media library is missing — then go get them.</strong></p>
+<p><strong>Find the movies your media library is missing, then go get them.</strong></p>
 
 <p>A local, self-hosted web app that compares your library against TMDb, shows you the gaps as a poster wall, completes your franchises, and hands missing titles straight to NZBHydra.</p>
 
@@ -26,11 +26,11 @@
 
 ## Why MediaGap
 
-Most "what's missing from my library" tooling is built for set-and-forget automation. MediaGap is built for **browsing**. Search an actor, a studio, or a franchise, and see instantly — as a wall of posters — what you own and what you're missing, then send the gaps to your downloader in a couple of clicks.
+Most "what's missing from my library" tooling is built for set-and-forget automation. MediaGap is built for browsing. Search an actor, a studio, or a franchise, and see at a glance, as a wall of posters, what you own and what you're missing. Then send the gaps to your downloader in a couple of clicks.
 
-- **Visual gap-finding.** Owned vs. missing at a glance, by person, movie, or studio — not a config screen.
-- **Franchise completion.** MediaGap finds the collections you've *started but not finished* ("you own 2 of 4 John Wick") and surfaces the missing entries, with junk like unreleased announcements filtered out.
-- **Straight to your downloader.** Missing titles flow into NZBHydra with quality/source filters, then to SABnzbd/NZBGet or a ZIP — no copy-pasting.
+- **Visual gap-finding.** Owned vs. missing at a glance, by person, movie, or studio. Not a config screen.
+- **Franchise completion.** MediaGap finds the collections you've started but not finished ("you own 2 of 4 John Wick") and surfaces the missing entries, with junk like unreleased announcements filtered out.
+- **Straight to your downloader.** Missing titles flow into NZBHydra with quality/source filters, then to SABnzbd/NZBGet or a ZIP. No copy-pasting.
 
 > **Server support:** Plex, Jellyfin, and Emby are supported today. The library layer normalizes each server into the same local movie records.
 
@@ -47,7 +47,7 @@ Most "what's missing from my library" tooling is built for set-and-forget automa
 - Sends selected NZBs to SABnzbd/NZBGet, or downloads checked releases as a ZIP.
 - Tracks downloader queue/history, with pause/resume controls.
 - Rich movie detail view: backdrop, clearlogo title, IMDb/TMDb ratings, content rating, cast and director, trailer, and a one-click **Open in {server}** link for owned titles.
-- Clickable cast and director jump straight to that person's filmography with owned/missing overlaid; a "Part of: …" line links a movie to its franchise collection.
+- Clickable cast and director jump straight to that person's filmography with owned/missing overlaid. A "Part of: ..." line links a movie to its franchise collection.
 - Writes local app/integration logs to `data/app.log` by default.
 
 > TV, Radarr, Sonarr, and direct per-indexer search are intentionally left for later versions.
@@ -64,7 +64,7 @@ npm run build
 npm start
 ```
 
-Open **[http://localhost:4174](http://localhost:4174)** in your browser. That's it — the app and its API both run on this one address.
+Open **[http://localhost:4174](http://localhost:4174)** in your browser. That's it. The app and its API both run on this one address.
 
 To use a different port:
 
@@ -72,7 +72,7 @@ To use a different port:
 PORT=8080 npm start
 ```
 
-…then open `http://localhost:8080` instead.
+Then open `http://localhost:8080` instead.
 
 ### Prefer Docker?
 
@@ -84,9 +84,9 @@ docker compose up --build
 
 Then open **[http://localhost:4174](http://localhost:4174)**.
 
-### Developing / modifying MediaGap
+### Developing or modifying MediaGap
 
-Only needed if you want to edit the code with live reload. `npm run dev` starts the UI on `http://localhost:5173` (hot-reloading) and the API on `4174`. For just *running* the app, use the `npm start` steps above instead.
+Only needed if you want to edit the code with live reload. `npm run dev` starts the UI on `http://localhost:5173` (hot-reloading) and the API on `4174`. For just running the app, use the `npm start` steps above instead.
 
 ---
 
@@ -98,7 +98,7 @@ For Plex, paste a Plex token manually in Settings. For Jellyfin or Emby, enter t
 
 ### Opening movies in your server
 
-Owned movies show an **Open in {server}** button that deep-links straight to that title in your media server's web UI. The link is built from the server URL you configured, so it works wherever that URL is reachable — on your local network if you used a local IP (e.g. `http://192.168.x.x:32400`), or remotely if you configured a public domain/DDNS address.
+Owned movies show an **Open in {server}** button that deep-links straight to that title in your media server's web UI. The link is built from the server URL you configured, so it works wherever that URL is reachable: on your local network if you used a local IP (e.g. `http://192.168.x.x:32400`), or remotely if you configured a public domain/DDNS address.
 
 ### Data
 
@@ -118,7 +118,7 @@ The Collections view uses owned movies with TMDb IDs to find franchises you have
 
 - [x] Jellyfin library support
 - [x] Emby library support
-- [ ] "Discover" collections — browse famous franchises you own none of
+- [ ] "Discover" collections: browse famous franchises you own none of
 - [ ] Bulk "grab all missing" per collection
 - [ ] TV support (Sonarr)
 
@@ -126,4 +126,4 @@ The Collections view uses owned movies with TMDb IDs to find franchises you have
 
 ## License
 
-[MIT](LICENSE) — do what you like, no warranty.
+[MIT](LICENSE). Do what you like, no warranty.

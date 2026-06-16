@@ -32,17 +32,17 @@ Most "what's missing from my library" tooling is built for set-and-forget automa
 - **Franchise completion.** MediaGap finds the collections you've *started but not finished* ("you own 2 of 4 John Wick") and surfaces the missing entries, with junk like unreleased announcements filtered out.
 - **Straight to your downloader.** Missing titles flow into NZBHydra with quality/source filters, then to SABnzbd/NZBGet or a ZIP — no copy-pasting.
 
-> **Server support:** Plex is supported today. **Jellyfin and Emby support is planned** — the library layer is built to add them without touching the rest of the app.
+> **Server support:** Plex, Jellyfin, and Emby are supported today. The library layer normalizes each server into the same local movie records.
 
 ---
 
 ## What v1 Does
 
-- Connects to Plex with a manual base URL and token.
-- Lets you choose which Plex movie libraries to scan into a local SQLite database.
+- Connects to Plex with a manual base URL/token, or Jellyfin/Emby with a base URL/API key/user ID.
+- Lets you choose which movie libraries to scan into a local SQLite database.
 - Searches TMDb for people, movies, and studios.
-- Finds partially complete TMDb movie collections from your Plex library.
-- Compares TMDb movie results with the local Plex scan and marks movies **owned** or **missing**.
+- Finds partially complete TMDb movie collections from your scanned library.
+- Compares TMDb movie results with the local media-server scan and marks movies **owned** or **missing**.
 - Searches NZBHydra for missing movies with quality and source filters.
 - Sends selected NZBs to SABnzbd/NZBGet, or downloads checked releases as a ZIP.
 - Tracks downloader queue/history, with pause/resume controls.
@@ -90,9 +90,9 @@ Then open [http://localhost:4174](http://localhost:4174).
 
 ## Configuration
 
-### Plex Token
+### Media Server
 
-For v1, paste a Plex token manually in Settings. The token is stored locally in SQLite on your machine.
+For Plex, paste a Plex token manually in Settings. For Jellyfin or Emby, enter the server URL, API key, and user ID or exact username. Credentials are stored locally in SQLite on your machine.
 
 ### Data
 
@@ -104,13 +104,14 @@ SABnzbd sends use file upload from the app server, so SAB does not need direct a
 
 ### Collections
 
-The Collections view uses owned Plex movies with TMDb IDs to find franchises you have started but have not finished. Refreshing collections caches TMDb collection members in SQLite, then overlays owned/missing status using the same matching and NZBHydra handoff as search results.
+The Collections view uses owned movies with TMDb IDs to find franchises you have started but have not finished. Refreshing collections caches TMDb collection members in SQLite, then overlays owned/missing status using the same matching and NZBHydra handoff as search results.
 
 ---
 
 ## Roadmap
 
-- [ ] Jellyfin and Emby library support
+- [x] Jellyfin library support
+- [x] Emby library support
 - [ ] "Discover" collections — browse famous franchises you own none of
 - [ ] Bulk "grab all missing" per collection
 - [ ] TV support (Sonarr)

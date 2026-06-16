@@ -1,6 +1,16 @@
 import { CheckCircle2, FolderOpen, PlugZap, RefreshCw, Save, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
-import { DOWNLOADER_TYPES, QUALITY_FILTERS, SOURCE_FILTERS, THEME_MODES, type AppSettings, type ConnectionResult } from "../../shared/types";
+import {
+  DOWNLOADER_TYPES,
+  MEDIA_SERVER_TYPES,
+  QUALITY_FILTERS,
+  SOURCE_FILTERS,
+  THEME_MODES,
+  mediaServerLabel,
+  themeLabel,
+  type AppSettings,
+  type ConnectionResult
+} from "../../shared/types";
 import { api } from "../lib/api";
 
 interface SettingsPanelProps {
@@ -23,6 +33,21 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
 
   function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+    if (
+      [
+        "mediaServerType",
+        "plexBaseUrl",
+        "plexToken",
+        "jellyfinBaseUrl",
+        "jellyfinApiKey",
+        "jellyfinUserId",
+        "embyBaseUrl",
+        "embyApiKey",
+        "embyUserId"
+      ].includes(String(key))
+    ) {
+      setConnection((current) => ({ ...current, "media-server": null }));
+    }
   }
 
   function toggleList(key: "defaultQualities" | "defaultSources", value: string) {
@@ -47,10 +72,10 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
     }
   }
 
-  async function test(service: "plex" | "tmdb" | "nzbhydra" | "downloader") {
+  async function test(service: "media-server" | "tmdb" | "nzbhydra" | "downloader") {
     setConnection((current) => ({ ...current, [service]: null }));
     try {
-      const result = await api.testConnection(service);
+      const result = await api.testConnection(service, draft);
       setConnection((current) => ({ ...current, [service]: result }));
     } catch (error) {
       setConnection((current) => ({
@@ -99,26 +124,57 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
 
       <div className="settings-grid">
         <ConnectionCard
-          title="Plex"
-          description="Used to scan your local movie library."
-          onTest={() => test("plex")}
-          result={connection.plex}
+          title="Media server"
+          description="Choose which local library MediaGap scans for owned movies."
+          onTest={() => test("media-server")}
+          result={connection["media-server"]}
         >
           <label>
-            Server URL
-            <input value={draft.plexBaseUrl} onChange={(event) => update("plexBaseUrl", event.target.value)} placeholder="http://localhost:32400" />
+            Type
+            <select value={draft.mediaServerType} onChange={(event) => update("mediaServerType", event.target.value as AppSettings["mediaServerType"])}>
+              {MEDIA_SERVER_TYPES.map((type) => (
+                <option value={type} key={type}>
+                  {mediaServerLabel(type)}
+                </option>
+              ))}
+            </select>
           </label>
-          <label>
-            Plex token
-            <input value={draft.plexToken} onChange={(event) => update("plexToken", event.target.value)} placeholder="Paste token" />
-          </label>
+          {draft.mediaServerType === "plex" ? (
+            <>
+              <label>
+                Plex URL
+                <input value={draft.plexBaseUrl} onChange={(event) => update("plexBaseUrl", event.target.value)} placeholder="http://localhost:32400" />
+              </label>
+              <label>
+                Plex token
+                <input value={draft.plexToken} onChange={(event) => update("plexToken", event.target.value)} placeholder="Paste token" />
+              </label>
+            </>
+          ) : null}
+          {draft.mediaServerType === "jellyfin" || draft.mediaServerType === "emby" ? (
+            <EmbyFamilyFields draft={draft} update={update} />
+          ) : null}
         </ConnectionCard>
 
-        <ConnectionCard title="TMDb" description="Used for filmographies, posters, and release dates." onTest={() => test("tmdb")} result={connection.tmdb}>
+        <ConnectionCard
+          title="TMDb"
+          description="Used for filmographies, posters, release dates, ratings, and optional collection artwork."
+          onTest={() => test("tmdb")}
+          result={connection.tmdb}
+        >
           <label>
             API key
             <input value={draft.tmdbApiKey} onChange={(event) => update("tmdbApiKey", event.target.value)} placeholder="TMDb API key" />
           </label>
+          <label>
+            Fanart.tv API key optional
+            <input
+              value={draft.fanartApiKey}
+              onChange={(event) => update("fanartApiKey", event.target.value)}
+              placeholder="Fanart.tv API key for collection logos"
+            />
+          </label>
+          <p className="muted-line">Fanart is only used for franchise/collection artwork. Leave it blank to use TMDb art and text.</p>
         </ConnectionCard>
 
         <ConnectionCard
@@ -247,14 +303,14 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
           <select value={draft.themeMode} onChange={(event) => update("themeMode", event.target.value as AppSettings["themeMode"])}>
             {THEME_MODES.map((theme) => (
               <option value={theme} key={theme}>
-                {theme === "light" ? "Light" : theme === "plex" ? "Plex dark" : "Dark"}
+                {themeLabel(theme)}
               </option>
             ))}
           </select>
         </div>
         <label className="toggle-row">
           <input type="checkbox" checked={draft.refreshOnStart} onChange={(event) => update("refreshOnStart", event.target.checked)} />
-          Refresh Plex library when the app starts
+          Refresh {mediaServerLabel(draft.mediaServerType)} library when the app starts
         </label>
       </div>
 
@@ -296,5 +352,49 @@ function ConnectionCard({
         </p>
       ) : null}
     </div>
+  );
+}
+
+function EmbyFamilyFields({
+  draft,
+  update
+}: {
+  draft: AppSettings;
+  update: <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => void;
+}) {
+  const isEmby = draft.mediaServerType === "emby";
+  const label = mediaServerLabel(draft.mediaServerType);
+  const baseUrlKey = isEmby ? "embyBaseUrl" : "jellyfinBaseUrl";
+  const apiKeyKey = isEmby ? "embyApiKey" : "jellyfinApiKey";
+  const userIdKey = isEmby ? "embyUserId" : "jellyfinUserId";
+
+  return (
+    <>
+      <label>
+        {label} URL
+        <input
+          value={draft[baseUrlKey]}
+          onChange={(event) => update(baseUrlKey, event.target.value)}
+          placeholder="http://localhost:8096"
+        />
+      </label>
+      <label>
+        API key
+        <input
+          value={draft[apiKeyKey]}
+          onChange={(event) => update(apiKeyKey, event.target.value)}
+          placeholder={`${label} API key`}
+        />
+      </label>
+      <label>
+        User ID
+        <input
+          value={draft[userIdKey]}
+          onChange={(event) => update(userIdKey, event.target.value)}
+          placeholder={`${label} user ID or username`}
+        />
+      </label>
+      <p className="muted-line">{label} scans are user-scoped, so MediaGap needs the user ID or exact username for library views.</p>
+    </>
   );
 }

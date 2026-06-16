@@ -157,7 +157,16 @@ export function NzbDrawer({ movie, defaultQualities, defaultSources, defaultCate
   }
 
   return (
-    <aside className="drawer" aria-label="NZBHydra search">
+    <div
+      className="drawer-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="NZBHydra search"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <aside className="drawer">
       <div className="drawer-header">
         <div>
           <p className="eyebrow">NZBHydra search</p>
@@ -329,7 +338,8 @@ export function NzbDrawer({ movie, defaultQualities, defaultSources, defaultCate
         onPrevious={() => search(Math.max(0, offset - limit))}
         onNext={() => search(offset + limit)}
       />
-    </aside>
+      </aside>
+    </div>
   );
 }
 

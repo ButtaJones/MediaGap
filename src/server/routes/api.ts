@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import {
   addHistoryEntry,
@@ -6,12 +7,13 @@ import {
   getLibraryStats,
   getSettings,
   listHistoryEntries,
+  replaceMediaServerMovies,
   saveSettings,
   updateHistoryEntry,
-  upsertPlexMovies
 } from "../db.js";
 import { controlDownloader, getDownloaderStatus, sendToDownloader, testDownloaderConnection } from "../integrations/downloader.js";
-import { getMovieSections, scanPlexMovies, testPlexConnection } from "../integrations/plex.js";
+import type { MediaServer } from "../integrations/mediaServer.js";
+import { createMediaServer } from "../integrations/mediaServers.js";
 import {
   getContinueCollections,
   getCollectionRefreshStatus,
@@ -29,14 +31,25 @@ import { appendLog, openLogFolder, readRecentLogs } from "../services/logger.js"
 import { fetchManyNzbs, safeFilename } from "../services/nzb.js";
 import { createZip } from "../services/zip.js";
 import { getAppMeta } from "../services/appMeta.js";
-import { DOWNLOADER_TYPES, QUALITY_FILTERS, SOURCE_FILTERS, THEME_MODES } from "../../shared/types.js";
+import { DOWNLOADER_TYPES, MEDIA_SERVER_TYPES, QUALITY_FILTERS, SOURCE_FILTERS, THEME_MODES, mediaServerLabel } from "../../shared/types.js";
 
 export const api = Router();
 
 const settingsSchema = z.object({
+  mediaServerType: z.enum(MEDIA_SERVER_TYPES).default("plex"),
   plexBaseUrl: z.string(),
   plexToken: z.string(),
+  jellyfinBaseUrl: z.string().default(""),
+  jellyfinApiKey: z.string().default(""),
+  jellyfinUserId: z.string().default(""),
+  embyBaseUrl: z.string().default(""),
+  embyApiKey: z.string().default(""),
+  embyUserId: z.string().default(""),
+  plexMachineId: z.string().default(""),
+  jellyfinServerId: z.string().default(""),
+  embyServerId: z.string().default(""),
   tmdbApiKey: z.string(),
+  fanartApiKey: z.string().default(""),
   nzbHydraBaseUrl: z.string(),
   nzbHydraApiKey: z.string(),
   defaultQualities: z.array(z.enum(QUALITY_FILTERS)).default(["1080p"]),
@@ -60,6 +73,27 @@ function requireSettings() {
   return settings;
 }
 
+const SERVER_ID_FIELD: Record<MediaServer["type"], "plexMachineId" | "jellyfinServerId" | "embyServerId"> = {
+  plex: "plexMachineId",
+  jellyfin: "jellyfinServerId",
+  emby: "embyServerId"
+};
+
+// Fetch the active server's deep-link id (Plex machineIdentifier / Jellyfin-Emby System/Info Id)
+// and persist it for the modal's "Open in {server}" link. Best-effort: never throws.
+async function refreshStoredServerId(server: MediaServer): Promise<void> {
+  try {
+    const serverId = await server.getServerId();
+    if (!serverId) return;
+    const current = getSettings();
+    const field = SERVER_ID_FIELD[server.type];
+    if (current[field] === serverId) return;
+    saveSettings({ ...current, [field]: serverId });
+  } catch {
+    // Non-fatal: the deep-link falls back to the server web root when the id is unavailable.
+  }
+}
+
 api.get("/health", (_req, res) => {
   res.json({ ok: true });
 });
@@ -74,7 +108,22 @@ api.get("/settings", (_req, res) => {
 
 api.put("/settings", (req, res) => {
   const parsed = settingsSchema.parse(req.body);
-  const saved = saveSettings(parsed);
+  const previous = getSettings();
+  // serverId / machineId are fetched and persisted server-side (on connection test
+  // and scan); the settings form never edits them, so keep any stored value when the
+  // incoming payload doesn't carry one — otherwise a plain Save would wipe the deep-link IDs.
+  const saved = saveSettings({
+    ...parsed,
+    plexMachineId: parsed.plexMachineId || previous.plexMachineId,
+    jellyfinServerId: parsed.jellyfinServerId || previous.jellyfinServerId,
+    embyServerId: parsed.embyServerId || previous.embyServerId
+  });
+  if (previous.mediaServerType !== saved.mediaServerType) {
+    appendLog(saved.logPath, saved.loggingEnabled, "info", "Media server changed; loaded that server's saved scan state", {
+      previous: previous.mediaServerType,
+      next: saved.mediaServerType
+    });
+  }
   appendLog(saved.logPath, saved.loggingEnabled, "info", "Settings saved");
   res.json(saved);
 });
@@ -85,13 +134,21 @@ api.get("/stats", (_req, res) => {
 
 api.post("/connections/:service/test", async (req, res, next) => {
   try {
-    const settings = getSettings();
+    const settings = req.body && Object.keys(req.body).length ? settingsSchema.parse(req.body) : getSettings();
     const service = req.params.service;
-    if (service === "plex") {
-      if (!settings.plexBaseUrl || !settings.plexToken) throw new Error("Add Plex URL and token first.");
-      const result = await testPlexConnection(settings.plexBaseUrl, settings.plexToken);
-      appendLog(settings.logPath, settings.loggingEnabled, "info", "Plex connection test succeeded", { name: result.name });
-      res.json({ ok: true, message: "Connected to Plex.", ...result });
+    if (service === "media-server" || service === "plex") {
+      const server = createMediaServer(settings);
+      const result = await server.testConnection();
+      await refreshStoredServerId(server);
+      appendLog(settings.logPath, settings.loggingEnabled, "info", `${server.displayName} connection test succeeded`, {
+        name: result.name,
+        version: result.version
+      });
+      res.json({
+        ok: true,
+        message: `Connected to ${server.displayName}${result.version ? ` ${result.version}` : ""}.`,
+        ...result
+      });
       return;
     }
     if (service === "tmdb") {
@@ -134,42 +191,49 @@ api.post("/connections/:service/test", async (req, res, next) => {
   }
 });
 
-api.get("/plex/libraries", async (_req, res, next) => {
+async function handleLibraries(_req: Request, res: Response, next: NextFunction) {
   try {
     const settings = getSettings();
-    if (!settings.plexBaseUrl || !settings.plexToken) throw new Error("Add Plex URL and token in Settings first.");
-    const libraries = await getMovieSections(settings.plexBaseUrl, settings.plexToken);
-    appendLog(settings.logPath, settings.loggingEnabled, "info", "Loaded Plex libraries", { count: libraries.length });
+    const server = createMediaServer(settings);
+    const libraries = await server.getMovieLibraries();
+    appendLog(settings.logPath, settings.loggingEnabled, "info", `Loaded ${server.displayName} libraries`, { count: libraries.length });
     res.json({ libraries });
   } catch (error) {
     const settings = getSettings();
-    appendLog(settings.logPath, settings.loggingEnabled, "error", "Failed to load Plex libraries", {
+    appendLog(settings.logPath, settings.loggingEnabled, "error", `Failed to load ${mediaServerLabel(settings.mediaServerType)} libraries`, {
       error: error instanceof Error ? error.message : String(error)
     });
     next(error);
   }
-});
+}
 
-api.post("/plex/scan", async (req, res, next) => {
+api.get("/media-server/libraries", handleLibraries);
+api.get("/plex/libraries", handleLibraries);
+
+async function handleScan(req: Request, res: Response, next: NextFunction) {
   try {
     const settings = getSettings();
-    if (!settings.plexBaseUrl || !settings.plexToken) throw new Error("Add Plex URL and token in Settings first.");
+    const server = createMediaServer(settings);
     const body = z.object({ sectionKeys: z.array(z.string()).default([]) }).parse(req.body ?? {});
-    const scan = await scanPlexMovies(settings.plexBaseUrl, settings.plexToken, body.sectionKeys);
-    const imported = upsertPlexMovies(scan.movies);
-    appendLog(settings.logPath, settings.loggingEnabled, "info", "Plex scan completed", {
+    const scan = await server.scanMovies(body.sectionKeys);
+    const imported = replaceMediaServerMovies(server.type, scan.movies);
+    await refreshStoredServerId(server);
+    appendLog(settings.logPath, settings.loggingEnabled, "info", `${server.displayName} scan completed`, {
       imported,
       sections: scan.sections
     });
     res.json({ imported, sections: scan.sections, scannedAt: new Date().toISOString() });
   } catch (error) {
     const settings = getSettings();
-    appendLog(settings.logPath, settings.loggingEnabled, "error", "Plex scan failed", {
+    appendLog(settings.logPath, settings.loggingEnabled, "error", `${mediaServerLabel(settings.mediaServerType)} scan failed`, {
       error: error instanceof Error ? error.message : String(error)
     });
     next(error);
   }
-});
+}
+
+api.post("/media-server/scan", handleScan);
+api.post("/plex/scan", handleScan);
 
 api.get("/search", async (req, res, next) => {
   try {
@@ -221,7 +285,7 @@ api.get("/collections/discover", (_req, res, next) => {
 api.post("/collections/refresh", async (_req, res, next) => {
   try {
     const settings = requireSettings();
-    const status = startContinueCollectionsRefresh(settings.tmdbApiKey);
+    const status = startContinueCollectionsRefresh(settings.tmdbApiKey, settings.fanartApiKey);
     appendLog(settings.logPath, settings.loggingEnabled, "info", "Collection refresh started", {
       phase: status.phase,
       running: status.running

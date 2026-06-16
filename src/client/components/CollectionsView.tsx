@@ -11,6 +11,9 @@ interface CollectionsViewProps {
   onPosterSizeChange: (posterSize: number) => void;
   onSearchNzb: (movie: MovieResult) => void;
   onShowDetails: (movie: MovieResult) => void;
+  serverName: string;
+  focusCollectionId?: number | null;
+  onFocusHandled?: () => void;
 }
 
 type CollectionMode = "continue" | "discover";
@@ -34,7 +37,10 @@ export function CollectionsView({
   onViewModeChange,
   onPosterSizeChange,
   onSearchNzb,
-  onShowDetails
+  onShowDetails,
+  serverName,
+  focusCollectionId,
+  onFocusHandled
 }: CollectionsViewProps) {
   const [initialPrefs] = useState(readCollectionPrefs);
   const [continueCollections, setContinueCollections] = useState<MovieCollectionSummary[]>([]);
@@ -114,6 +120,76 @@ export function CollectionsView({
     return () => window.clearInterval(timer);
   }, [refreshStatus?.running]);
 
+  // Reveal and scroll to a collection requested from the movie detail modal. Each render
+  // performs the next normalization step (mode → query → filter → expand → page) toward
+  // making the target visible, then scrolls to it and clears the request.
+  useEffect(() => {
+    if (focusCollectionId == null) return;
+    if (!allCollections.length) return; // wait until collections have loaded
+
+    const inContinue = continueCollections.some((collection) => collection.id === focusCollectionId);
+    const inDiscover = discoverCollections.some((collection) => collection.id === focusCollectionId);
+    if (!inContinue && !inDiscover) {
+      onFocusHandled?.();
+      return;
+    }
+
+    const targetMode: CollectionMode =
+      (mode === "continue" && inContinue) || (mode === "discover" && inDiscover)
+        ? mode
+        : inContinue
+          ? "continue"
+          : "discover";
+    if (mode !== targetMode) {
+      setMode(targetMode);
+      return;
+    }
+    if (query) {
+      setQuery("");
+      return;
+    }
+    if (filter !== "all") {
+      setFilter("all");
+      return;
+    }
+    if (collapsedIds.has(focusCollectionId)) {
+      setCollapsedIds((current) => {
+        const next = new Set(current);
+        next.delete(focusCollectionId);
+        return next;
+      });
+      return;
+    }
+
+    const index = filteredCollections.findIndex((collection) => collection.id === focusCollectionId);
+    if (index >= 0) {
+      const targetPage = Math.floor(index / perPage);
+      if (safePage !== targetPage) {
+        setPage(targetPage);
+        return;
+      }
+    }
+
+    const handle = window.requestAnimationFrame(() => {
+      document.getElementById(`collection-card-${focusCollectionId}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    onFocusHandled?.();
+    return () => window.cancelAnimationFrame(handle);
+  }, [
+    focusCollectionId,
+    allCollections,
+    continueCollections,
+    discoverCollections,
+    mode,
+    query,
+    filter,
+    collapsedIds,
+    filteredCollections,
+    perPage,
+    safePage,
+    onFocusHandled
+  ]);
+
   async function loadCollections() {
     setLoading(true);
     setMessage("");
@@ -183,7 +259,7 @@ export function CollectionsView({
           <h2>{mode === "continue" ? "Continue franchises" : "Discover franchises"}</h2>
           <p className="muted-line">
             {mode === "continue"
-              ? "Partially complete TMDb collections from movies already in Plex, ranked closest-to-complete first."
+              ? `Partially complete TMDb collections from movies already in ${serverName}, ranked closest-to-complete first.`
               : "Curated famous TMDb collections, shown even when you own none of the movies."}
           </p>
         </div>
@@ -299,9 +375,9 @@ export function CollectionsView({
           <h3>{collections.length ? "No collections match" : mode === "continue" ? "No partial collections yet" : "No discover collections cached yet"}</h3>
           <p>
             {collections.length
-              ? "Try a different search, filter, or sort."
-              : mode === "continue"
-                ? "Run a Plex scan, then refresh collections to find franchises you have started but have not finished."
+                ? "Try a different search, filter, or sort."
+                : mode === "continue"
+                ? `Run a ${serverName} scan, then refresh collections to find franchises you have started but have not finished.`
                 : "Refresh collections once to fetch the curated franchise seed list from TMDb."}
           </p>
         </div>
@@ -322,7 +398,11 @@ export function CollectionsView({
         {pagedCollections.map((collection) => {
           const collapsed = collapsedIds.has(collection.id);
           return (
-          <article className={collapsed ? "collection-card collapsed" : "collection-card"} key={collection.id}>
+          <article
+            className={collapsed ? "collection-card collapsed" : "collection-card"}
+            key={collection.id}
+            id={`collection-card-${collection.id}`}
+          >
             <div className="collection-heading">
               <button
                 className="collection-toggle-button"
@@ -331,9 +411,13 @@ export function CollectionsView({
               >
                 {collapsed ? <ChevronRight size={19} /> : <ChevronDown size={19} />}
                 <span>
-                  <strong>{collection.name}</strong>
+                  {collection.logoPath ? (
+                    <img className="collection-logo" src={collection.logoPath} alt={collection.name} />
+                  ) : (
+                    <strong>{collection.name}</strong>
+                  )}
                   <small>
-                    {collection.ownedCount} of {collection.totalCount} in Plex · {collection.missingCount} missing
+                    {collection.ownedCount} of {collection.totalCount} in {serverName} · {collection.missingCount} missing
                   </small>
                 </span>
               </button>
@@ -348,6 +432,7 @@ export function CollectionsView({
                 posterSize={posterSize}
                 onSearchNzb={onSearchNzb}
                 onShowDetails={onShowDetails}
+                serverName={serverName}
                 emptyTitle="No usable collection movies"
                 emptyDescription="Unreleased entries and movies without runtime are hidden from collection counts."
               />

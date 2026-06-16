@@ -1,6 +1,8 @@
 import { XMLParser } from "fast-xml-parser";
 import { normalizeTitle, yearFromDate } from "../services/normalize.js";
-import type { PlexLibrary, PlexMovie } from "../../shared/types.js";
+import type { MediaServer } from "./mediaServer.js";
+import type { MediaServerConnectionResult } from "./mediaServer.js";
+import type { MediaServerLibrary, MediaServerMovie, PlexLibrary, PlexMovie } from "../../shared/types.js";
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -15,6 +17,13 @@ interface PlexVideo {
   guid?: string;
   thumb?: string;
   Guid?: { id?: string } | Array<{ id?: string }>;
+  Media?: PlexMedia | PlexMedia[];
+}
+
+interface PlexMedia {
+  videoResolution?: string;
+  width?: number;
+  height?: number;
 }
 
 function asArray<T>(value: T | T[] | undefined): T[] {
@@ -42,6 +51,32 @@ function extractTmdbId(video: PlexVideo): number | null {
   return null;
 }
 
+function extractImdbId(video: PlexVideo): string | null {
+  const candidates = [
+    video.guid,
+    ...asArray(video.Guid).map((guid) => guid.id)
+  ].filter(Boolean) as string[];
+
+  for (const candidate of candidates) {
+    const imdb = candidate.match(/imdb:\/\/(tt\d+)/i) ?? candidate.match(/imdb\.com\/title\/(tt\d+)/i);
+    if (imdb) return imdb[1];
+  }
+
+  return null;
+}
+
+function extractResolution(video: PlexVideo): string | null {
+  const media = asArray(video.Media)[0];
+  if (!media) return null;
+  if (media.videoResolution) return String(media.videoResolution);
+  const height = Number(media.height);
+  if (height >= 2160) return "4K";
+  if (height >= 1080) return "1080p";
+  if (height >= 720) return "720p";
+  if (height > 0) return "SD";
+  return null;
+}
+
 async function getXml(url: string) {
   const response = await fetch(url);
   if (!response.ok) {
@@ -50,24 +85,91 @@ async function getXml(url: string) {
   return parser.parse(await response.text());
 }
 
+export class PlexServer implements MediaServer {
+  readonly type = "plex" as const;
+  readonly displayName = "Plex";
+
+  constructor(
+    private readonly baseUrl: string,
+    private readonly token: string
+  ) {}
+
+  async testConnection(): Promise<MediaServerConnectionResult> {
+    const xml = await getXml(plexUrl(this.baseUrl, "/identity", this.token));
+    const container = xml.MediaContainer ?? {};
+    return {
+      name: container.friendlyName ?? container.machineIdentifier ?? "Plex server",
+      version: container.version ?? null
+    };
+  }
+
+  async getServerId(): Promise<string | null> {
+    const xml = await getXml(plexUrl(this.baseUrl, "/identity", this.token));
+    const machineId = xml.MediaContainer?.machineIdentifier;
+    return machineId ? String(machineId) : null;
+  }
+
+  async getMovieLibraries(): Promise<MediaServerLibrary[]> {
+    const xml = await getXml(plexUrl(this.baseUrl, "/library/sections", this.token));
+    const directories = asArray(xml.MediaContainer?.Directory);
+    return directories
+      .filter((section) => section.type === "movie")
+      .map((section) => ({
+        key: String(section.key),
+        title: String(section.title),
+        type: "movie"
+      }));
+  }
+
+  async scanMovies(sectionKeys: string[] = []): Promise<{ movies: MediaServerMovie[]; sections: string[] }> {
+    const availableSections = await this.getMovieLibraries();
+    const selected = new Set(sectionKeys);
+    const sections = selected.size
+      ? availableSections.filter((section) => selected.has(section.key))
+      : availableSections;
+    const movies: MediaServerMovie[] = [];
+
+    for (const section of sections) {
+      const url = plexUrl(this.baseUrl, `/library/sections/${section.key}/all`, this.token);
+      const hydratedUrl = new URL(url);
+      hydratedUrl.searchParams.set("type", "1");
+      hydratedUrl.searchParams.set("includeGuids", "1");
+
+      const xml = await getXml(hydratedUrl.toString());
+      const videos = asArray<PlexVideo>(xml.MediaContainer?.Video);
+
+      for (const video of videos) {
+        if (!video.ratingKey || !video.title) continue;
+        const releaseDate = video.originallyAvailableAt ?? null;
+        movies.push({
+          mediaServerType: this.type,
+          ratingKey: String(video.ratingKey),
+          title: video.title,
+          normalizedTitle: normalizeTitle(video.title),
+          year: video.year ? Number(video.year) : yearFromDate(releaseDate),
+          releaseDate,
+          tmdbId: extractTmdbId(video),
+          imdbId: extractImdbId(video),
+          resolution: extractResolution(video),
+          guid: video.guid ?? null,
+          posterPath: video.thumb ?? null
+        });
+      }
+    }
+
+    return {
+      movies,
+      sections: sections.map((section) => section.title)
+    };
+  }
+}
+
 export async function testPlexConnection(baseUrl: string, token: string) {
-  const xml = await getXml(plexUrl(baseUrl, "/identity", token));
-  const container = xml.MediaContainer ?? {};
-  return {
-    name: container.friendlyName ?? container.machineIdentifier ?? "Plex server"
-  };
+  return new PlexServer(baseUrl, token).testConnection();
 }
 
 export async function getMovieSections(baseUrl: string, token: string): Promise<PlexLibrary[]> {
-  const xml = await getXml(plexUrl(baseUrl, "/library/sections", token));
-  const directories = asArray(xml.MediaContainer?.Directory);
-  return directories
-    .filter((section) => section.type === "movie")
-    .map((section) => ({
-      key: String(section.key),
-      title: String(section.title),
-      type: "movie"
-    }));
+  return new PlexServer(baseUrl, token).getMovieLibraries();
 }
 
 export async function scanPlexMovies(
@@ -75,40 +177,5 @@ export async function scanPlexMovies(
   token: string,
   sectionKeys: string[] = []
 ): Promise<{ movies: PlexMovie[]; sections: string[] }> {
-  const availableSections = await getMovieSections(baseUrl, token);
-  const selected = new Set(sectionKeys);
-  const sections = selected.size
-    ? availableSections.filter((section) => selected.has(section.key))
-    : availableSections;
-  const movies: PlexMovie[] = [];
-
-  for (const section of sections) {
-    const url = plexUrl(baseUrl, `/library/sections/${section.key}/all`, token);
-    const hydratedUrl = new URL(url);
-    hydratedUrl.searchParams.set("type", "1");
-    hydratedUrl.searchParams.set("includeGuids", "1");
-
-    const xml = await getXml(hydratedUrl.toString());
-    const videos = asArray<PlexVideo>(xml.MediaContainer?.Video);
-
-    for (const video of videos) {
-      if (!video.ratingKey || !video.title) continue;
-      const releaseDate = video.originallyAvailableAt ?? null;
-      movies.push({
-        ratingKey: String(video.ratingKey),
-        title: video.title,
-        normalizedTitle: normalizeTitle(video.title),
-        year: video.year ? Number(video.year) : yearFromDate(releaseDate),
-        releaseDate,
-        tmdbId: extractTmdbId(video),
-        guid: video.guid ?? null,
-        posterPath: video.thumb ?? null
-      });
-    }
-  }
-
-  return {
-    movies,
-    sections: sections.map((section) => section.title)
-  };
+  return new PlexServer(baseUrl, token).scanMovies(sectionKeys);
 }

@@ -13,7 +13,7 @@ import type {
   MovieResult,
   NzbResult,
   NzbSearchResponse,
-  PlexLibrary,
+  MediaServerLibrary,
   ScanResponse,
   SearchResponse,
   SearchSuggestion
@@ -53,9 +53,18 @@ export const api = {
       body: JSON.stringify(settings)
     }),
   stats: () => request<{ movieCount: number; lastScannedAt: string | null }>("/stats"),
-  testConnection: (service: "plex" | "tmdb" | "nzbhydra" | "downloader") =>
-    request<ConnectionResult>(`/connections/${service}/test`, { method: "POST" }),
-  plexLibraries: () => request<{ libraries: PlexLibrary[] }>("/plex/libraries"),
+  testConnection: (service: "media-server" | "plex" | "tmdb" | "nzbhydra" | "downloader", settings?: AppSettings) =>
+    request<ConnectionResult>(`/connections/${service}/test`, {
+      method: "POST",
+      body: settings ? JSON.stringify(settings) : undefined
+    }),
+  mediaLibraries: () => request<{ libraries: MediaServerLibrary[] }>("/media-server/libraries"),
+  scanMediaServer: (sectionKeys: string[]) =>
+    request<ScanResponse>("/media-server/scan", {
+      method: "POST",
+      body: JSON.stringify({ sectionKeys })
+    }),
+  plexLibraries: () => request<{ libraries: MediaServerLibrary[] }>("/plex/libraries"),
   scanPlex: (sectionKeys: string[]) =>
     request<ScanResponse>("/plex/scan", {
       method: "POST",

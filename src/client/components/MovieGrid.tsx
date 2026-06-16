@@ -8,6 +8,7 @@ interface MovieGridProps {
   posterSize: number;
   onSearchNzb: (movie: MovieResult) => void;
   onShowDetails: (movie: MovieResult) => void;
+  serverName: string;
   emptyTitle?: string;
   emptyDescription?: string;
 }
@@ -18,6 +19,7 @@ export function MovieGrid({
   posterSize,
   onSearchNzb,
   onShowDetails,
+  serverName,
   emptyTitle = "Search a person, movie, or studio",
   emptyDescription = "Results will appear here with clear owned and missing states."
 }: MovieGridProps) {
@@ -52,7 +54,7 @@ export function MovieGrid({
               <div className="list-title-line">
                 <h3>{movie.title}</h3>
                 {movie.listRank ? <span className="rank-badge">#{movie.listRank}</span> : null}
-                <span className={movie.owned ? "inline-badge owned" : "inline-badge missing"}>{movie.owned ? "In Plex" : "Missing"}</span>
+                <span className={movie.owned ? "inline-badge owned" : "inline-badge missing"}>{movie.owned ? `In ${serverName}` : "Missing"}</span>
               </div>
               <p>{movie.year ?? "Unknown year"}</p>
               {movie.imdbRating ? (
@@ -103,7 +105,7 @@ export function MovieGrid({
         >
           <div className="poster-frame">
             {movie.posterPath ? <img src={movie.posterPath} alt="" /> : <Film size={42} />}
-            <span className={movie.owned ? "badge owned" : "badge missing"}>{movie.owned ? "In Plex" : "Missing"}</span>
+            <span className={movie.owned ? "badge owned" : "badge missing"}>{movie.owned ? `In ${serverName}` : "Missing"}</span>
             {movie.listRank ? <span className="rank-badge poster-rank">#{movie.listRank}</span> : null}
           </div>
           <div className="movie-copy">

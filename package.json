@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A local web app for finding media gaps in a Plex library and searching NZBHydra.",
+  "description": "A local web app for finding media gaps in Plex, Jellyfin, or Emby and searching NZBHydra.",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:server": "tsx watch src/server/index.ts",

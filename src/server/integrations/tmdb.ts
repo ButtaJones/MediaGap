@@ -2,15 +2,18 @@ import {
   cacheGet,
   cacheSet,
   listCachedCollections,
+  listCollectionsPendingFanart,
   listMissingCollectionCacheIds,
   listMissingCollectionMapIds,
   listOwnedCollectionIds,
   listPlexMovieTmdbIds,
   matchMovie,
   upsertCollectionCache,
+  upsertCollectionFanart,
   upsertMovieCollectionMaps
 } from "../db.js";
 import type { CachedCollectionMovie } from "../db.js";
+import { fetchCollectionFanartLogo } from "./fanart.js";
 import { yearFromDate } from "../services/normalize.js";
 import { DISCOVER_COLLECTIONS } from "../seeds/discoverCollections.js";
 import zlib from "node:zlib";
@@ -26,6 +29,7 @@ import type {
 const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMAGE_BASE = "https://image.tmdb.org/t/p/w342";
 const BACKDROP_BASE = "https://image.tmdb.org/t/p/w780";
+const LOGO_BASE = "https://image.tmdb.org/t/p/original";
 const IMDB_RATINGS_URL = "https://datasets.imdbws.com/title.ratings.tsv.gz";
 let imdbRatingsPromise: Promise<Map<string, { rating: number; votes: number }>> | null = null;
 let collectionRefreshStatus: CollectionsRefreshStatus = {
@@ -55,8 +59,14 @@ interface TmdbMovie {
   popularity?: number;
 }
 
+interface TmdbFindResponse {
+  movie_results?: TmdbMovie[];
+}
+
 interface TmdbMovieDetails extends TmdbMovie {
   runtime?: number | null;
+  vote_average?: number | null;
+  vote_count?: number | null;
   genres?: Array<{ id: number; name: string }>;
   backdrop_path?: string | null;
   tagline?: string | null;
@@ -91,6 +101,42 @@ interface TmdbCrewMember {
   name: string;
   job?: string;
   department?: string;
+}
+
+interface TmdbImage {
+  file_path?: string | null;
+  iso_639_1?: string | null;
+  vote_average?: number;
+  vote_count?: number;
+  width?: number;
+}
+
+interface TmdbImagesResponse {
+  logos?: TmdbImage[];
+}
+
+interface TmdbVideo {
+  key?: string;
+  site?: string;
+  type?: string;
+  official?: boolean;
+}
+
+interface TmdbVideosResponse {
+  results?: TmdbVideo[];
+}
+
+interface TmdbReleaseDateCountry {
+  iso_3166_1?: string;
+  release_dates?: Array<{
+    certification?: string;
+    type?: number;
+    release_date?: string;
+  }>;
+}
+
+interface TmdbReleaseDatesResponse {
+  results?: TmdbReleaseDateCountry[];
 }
 
 interface TmdbPerson {
@@ -130,7 +176,7 @@ export function getCollectionRefreshStatus(): CollectionsRefreshStatus {
   return { ...collectionRefreshStatus };
 }
 
-export function startContinueCollectionsRefresh(apiKey: string): CollectionsRefreshStatus {
+export function startContinueCollectionsRefresh(apiKey: string, fanartApiKey = ""): CollectionsRefreshStatus {
   if (collectionRefreshStatus.running && collectionRefreshPromise) {
     return getCollectionRefreshStatus();
   }
@@ -149,7 +195,7 @@ export function startContinueCollectionsRefresh(apiKey: string): CollectionsRefr
     finishedAt: null
   };
 
-  collectionRefreshPromise = refreshContinueCollections(apiKey)
+  collectionRefreshPromise = refreshContinueCollections(apiKey, fanartApiKey)
     .then((response) => {
       setCollectionRefreshStatus({
         running: false,
@@ -205,6 +251,22 @@ function sortMovies(movies: MovieResult[]): MovieResult[] {
 export async function testTmdbConnection(apiKey: string) {
   await tmdbFetch(apiKey, "/configuration");
   return { name: "TMDb" };
+}
+
+export async function resolveTmdbIdFromImdb(apiKey: string, imdbId: string): Promise<number | null> {
+  const normalized = imdbId.trim();
+  if (!normalized) return null;
+
+  const key = `tmdb:find:imdb:${normalized}`;
+  const cached = cacheGet<{ tmdbId: number | null }>(key);
+  if (cached) return cached.tmdbId;
+
+  const response = await tmdbFetch<TmdbFindResponse>(apiKey, `/find/${encodeURIComponent(normalized)}`, {
+    external_source: "imdb_id"
+  });
+  const tmdbId = response.movie_results?.[0]?.id ?? null;
+  cacheSet(key, { tmdbId });
+  return tmdbId;
 }
 
 export async function searchSuggestions(
@@ -275,7 +337,12 @@ export async function getMovieDetails(apiKey: string, tmdbId: number): Promise<M
   if (!movie) throw new Error("TMDb did not return movie details.");
   const externalIds = raw as TmdbMovieDetails & { external_ids?: { imdb_id?: string | null } };
   const imdbId = movie.imdbId ?? externalIds.external_ids?.imdb_id ?? null;
-  const imdbRating = imdbId ? (await getImdbRatings()).get(imdbId) : null;
+  const [imdbRating, logoPath, contentRating, trailerKey] = await Promise.all([
+    imdbId ? getImdbRatings().then((ratings) => ratings.get(imdbId) ?? null) : Promise.resolve(null),
+    getMovieLogo(apiKey, tmdbId),
+    getMovieContentRating(apiKey, tmdbId),
+    getMovieTrailerKey(apiKey, tmdbId)
+  ]);
 
   return {
     ...movie,
@@ -290,7 +357,12 @@ export async function getMovieDetails(apiKey: string, tmdbId: number): Promise<M
         .map((member) => member.name)
         .filter(Boolean) ?? [],
     backdropPath: raw.backdrop_path ? `${BACKDROP_BASE}${raw.backdrop_path}` : null,
+    logoPath,
     tagline: raw.tagline || null,
+    tmdbRating: typeof raw.vote_average === "number" ? raw.vote_average : null,
+    tmdbVotes: typeof raw.vote_count === "number" ? raw.vote_count : null,
+    contentRating,
+    trailerKey,
     cast:
       raw.credits?.cast
         ?.slice()
@@ -303,6 +375,108 @@ export async function getMovieDetails(apiKey: string, tmdbId: number): Promise<M
           profilePath: member.profile_path ? `${IMAGE_BASE}${member.profile_path}` : null
         })) ?? []
   };
+}
+
+async function getMovieLogo(apiKey: string, tmdbId: number): Promise<string | null> {
+  const key = `tmdb:movie-logo:${tmdbId}`;
+  const cached = cacheGet<{ logoPath: string | null }>(key);
+  if (cached) return cached.logoPath;
+
+  const response = await tmdbFetch<TmdbImagesResponse>(apiKey, `/movie/${tmdbId}/images`, {
+    include_image_language: "en,null"
+  });
+  const logo = pickTmdbLogo(response.logos ?? []);
+  const logoPath = logo?.file_path ? `${LOGO_BASE}${logo.file_path}` : null;
+  cacheSet(key, { logoPath });
+  return logoPath;
+}
+
+function pickTmdbLogo(logos: TmdbImage[]): TmdbImage | null {
+  const ranked = logos
+    .filter((logo) => logo.file_path)
+    .sort(
+      (a, b) =>
+        logoLanguageScore(b) - logoLanguageScore(a) ||
+        (b.vote_average ?? 0) - (a.vote_average ?? 0) ||
+        (b.vote_count ?? 0) - (a.vote_count ?? 0) ||
+        (b.width ?? 0) - (a.width ?? 0)
+    );
+  return ranked[0] ?? null;
+}
+
+function logoLanguageScore(logo: TmdbImage) {
+  if (logo.iso_639_1 === "en") return 2;
+  if (logo.iso_639_1 === null || logo.iso_639_1 === undefined) return 1;
+  return 0;
+}
+
+async function getMovieTrailerKey(apiKey: string, tmdbId: number): Promise<string | null> {
+  const key = `tmdb:movie-trailer:${tmdbId}`;
+  const cached = cacheGet<{ trailerKey: string | null }>(key);
+  if (cached) return cached.trailerKey;
+
+  try {
+    const response = await tmdbFetch<TmdbVideosResponse>(apiKey, `/movie/${tmdbId}/videos`);
+    const trailerKey = pickTrailerKey(response.results ?? []);
+    cacheSet(key, { trailerKey });
+    return trailerKey;
+  } catch {
+    // Degrade gracefully — a missing trailer just omits the button, never fails details.
+    return null;
+  }
+}
+
+function pickTrailerKey(videos: TmdbVideo[]): string | null {
+  const youtube = videos.filter((video) => video.site === "YouTube" && video.key);
+  if (!youtube.length) return null;
+  const officialTrailer = youtube.find((video) => video.type === "Trailer" && video.official);
+  if (officialTrailer?.key) return officialTrailer.key;
+  const anyTrailer = youtube.find((video) => video.type === "Trailer");
+  if (anyTrailer?.key) return anyTrailer.key;
+  return youtube[0]?.key ?? null;
+}
+
+async function getMovieContentRating(apiKey: string, tmdbId: number): Promise<string | null> {
+  const key = `tmdb:movie-certification:${tmdbId}`;
+  const cached = cacheGet<{ certification: string | null }>(key);
+  if (cached) return cached.certification;
+
+  const response = await tmdbFetch<TmdbReleaseDatesResponse>(apiKey, `/movie/${tmdbId}/release_dates`);
+  const certification = pickCertification(response);
+  cacheSet(key, { certification });
+  return certification;
+}
+
+function pickCertification(response: TmdbReleaseDatesResponse) {
+  const countries = response.results ?? [];
+  const usCertification = pickCertificationFromCountry(countries.find((country) => country.iso_3166_1 === "US"));
+  if (usCertification) return usCertification;
+
+  for (const country of countries) {
+    const certification = pickCertificationFromCountry(country);
+    if (certification) return certification;
+  }
+  return null;
+}
+
+function pickCertificationFromCountry(country?: TmdbReleaseDateCountry) {
+  if (!country?.release_dates?.length) return null;
+  const typePreference = new Map([
+    [3, 0],
+    [2, 1],
+    [1, 2],
+    [4, 3],
+    [5, 4],
+    [6, 5]
+  ]);
+  const candidates = country.release_dates
+    .filter((release) => release.certification?.trim())
+    .sort(
+      (a, b) =>
+        (typePreference.get(a.type ?? 999) ?? 999) - (typePreference.get(b.type ?? 999) ?? 999) ||
+        (a.release_date ?? "").localeCompare(b.release_date ?? "")
+    );
+  return candidates[0]?.certification?.trim() || null;
 }
 
 export function getContinueCollections(): CollectionsResponse {
@@ -346,6 +520,7 @@ function toCollectionSummary(collection: ReturnType<typeof listCachedCollections
     name: collection.name,
     posterPath: collection.posterPath,
     backdropPath: collection.backdropPath,
+    logoPath: collection.logoPath,
     ownedCount,
     missingCount: totalCount - ownedCount,
     totalCount,
@@ -358,7 +533,7 @@ function getDiscoverCollectionIds() {
   return [...new Set(DISCOVER_COLLECTIONS.map((collection) => collection.id))];
 }
 
-export async function refreshContinueCollections(apiKey: string): Promise<CollectionsRefreshResponse> {
+export async function refreshContinueCollections(apiKey: string, fanartApiKey = ""): Promise<CollectionsRefreshResponse> {
   const tmdbIds = listPlexMovieTmdbIds();
   const missingMapIds = listMissingCollectionMapIds(tmdbIds);
   const maps: Array<{ tmdbId: number; collectionId: number | null; collectionName: string | null }> = [];
@@ -374,7 +549,7 @@ export async function refreshContinueCollections(apiKey: string): Promise<Collec
     fetchedCollections: 0,
     skippedItems: 0,
     message: missingMapIds.length
-      ? `Checking ${missingMapIds.length.toLocaleString()} owned Plex movies for TMDb collection data...`
+      ? `Checking ${missingMapIds.length.toLocaleString()} owned movies for TMDb collection data...`
       : "Owned movie collection map is already cached."
   });
 
@@ -409,6 +584,7 @@ export async function refreshContinueCollections(apiKey: string): Promise<Collec
 
   const collectionIds = [...new Set([...listOwnedCollectionIds(), ...getDiscoverCollectionIds()])];
   const missingCollectionIds = listMissingCollectionCacheIds(collectionIds);
+  const fanartEnabled = Boolean(fanartApiKey.trim());
   setCollectionRefreshStatus({
     phase: "collections",
     totalCollections: missingCollectionIds.length,
@@ -432,6 +608,36 @@ export async function refreshContinueCollections(apiKey: string): Promise<Collec
       skippedItems,
       message: `Fetched ${fetchedCollections.toLocaleString()} of ${missingCollectionIds.length.toLocaleString()} TMDb collections.`
     });
+  }
+
+  if (fanartEnabled) {
+    const pendingFanartIds = listCollectionsPendingFanart(collectionIds);
+    setCollectionRefreshStatus({
+      phase: "collections",
+      totalCollections: pendingFanartIds.length,
+      fetchedCollections: 0,
+      skippedItems,
+      message: pendingFanartIds.length
+        ? `Fetching Fanart.tv logos for ${pendingFanartIds.length.toLocaleString()} collection${pendingFanartIds.length === 1 ? "" : "s"}...`
+        : "Fanart.tv collection logos are already cached."
+    });
+
+    let fetchedArtwork = 0;
+    for (const batch of chunks(pendingFanartIds, 3)) {
+      const results = await Promise.allSettled(batch.map((collectionId) => fetchAndCacheCollectionFanart(fanartApiKey, collectionId)));
+      for (const result of results) {
+        if (result.status === "fulfilled") {
+          fetchedArtwork += 1;
+        } else {
+          skippedItems += 1;
+        }
+      }
+      setCollectionRefreshStatus({
+        fetchedCollections: fetchedArtwork,
+        skippedItems,
+        message: `Checked Fanart.tv artwork for ${fetchedArtwork.toLocaleString()} of ${pendingFanartIds.length.toLocaleString()} collections.`
+      });
+    }
   }
 
   return {
@@ -479,8 +685,14 @@ async function fetchAndCacheCollection(apiKey: string, collectionId: number): Pr
     name: raw.name,
     posterPath: raw.poster_path ? `${IMAGE_BASE}${raw.poster_path}` : null,
     backdropPath: raw.backdrop_path ? `${BACKDROP_BASE}${raw.backdrop_path}` : null,
+    logoPath: null,
     movies
   });
+}
+
+async function fetchAndCacheCollectionFanart(apiKey: string, collectionId: number): Promise<void> {
+  const logoPath = await fetchCollectionFanartLogo(apiKey, collectionId);
+  upsertCollectionFanart(collectionId, logoPath);
 }
 
 function isUsableCollectionMovie(movie: TmdbMovieDetails) {

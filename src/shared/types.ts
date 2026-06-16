@@ -1,17 +1,52 @@
 export const QUALITY_FILTERS = ["SD", "720p", "1080p", "4K"] as const;
 export const SOURCE_FILTERS = ["BluRay", "WEB-DL", "WEBRip", "DVD", "REMUX"] as const;
 export const DOWNLOADER_TYPES = ["none", "sabnzbd", "nzbget"] as const;
-export const THEME_MODES = ["light", "dark", "plex"] as const;
+export const THEME_MODES = ["light", "dark", "plex", "emby", "jellyfin"] as const;
+export const MEDIA_SERVER_TYPES = ["plex", "jellyfin", "emby"] as const;
 
 export type QualityFilter = (typeof QUALITY_FILTERS)[number];
 export type SourceFilter = (typeof SOURCE_FILTERS)[number];
 export type DownloaderType = (typeof DOWNLOADER_TYPES)[number];
 export type ThemeMode = (typeof THEME_MODES)[number];
+export type MediaServerType = (typeof MEDIA_SERVER_TYPES)[number];
+
+export const MEDIA_SERVER_LABELS: Record<MediaServerType, string> = {
+  plex: "Plex",
+  jellyfin: "Jellyfin",
+  emby: "Emby"
+};
+
+export const THEME_LABELS: Record<ThemeMode, string> = {
+  light: "Light",
+  dark: "Dark",
+  plex: "Plex dark",
+  emby: "Emby green",
+  jellyfin: "Jellyfin purple/blue"
+};
+
+export function mediaServerLabel(type: MediaServerType): string {
+  return MEDIA_SERVER_LABELS[type] ?? "Media server";
+}
+
+export function themeLabel(type: ThemeMode): string {
+  return THEME_LABELS[type] ?? "Light";
+}
 
 export interface AppSettings {
+  mediaServerType: MediaServerType;
   plexBaseUrl: string;
   plexToken: string;
+  jellyfinBaseUrl: string;
+  jellyfinApiKey: string;
+  jellyfinUserId: string;
+  embyBaseUrl: string;
+  embyApiKey: string;
+  embyUserId: string;
+  plexMachineId: string;
+  jellyfinServerId: string;
+  embyServerId: string;
   tmdbApiKey: string;
+  fanartApiKey: string;
   nzbHydraBaseUrl: string;
   nzbHydraApiKey: string;
   defaultQualities: QualityFilter[];
@@ -39,22 +74,29 @@ export interface AppMeta {
   builtAt: string | null;
 }
 
-export interface PlexMovie {
+export interface MediaServerMovie {
+  mediaServerType: MediaServerType;
   ratingKey: string;
   title: string;
   normalizedTitle: string;
   year: number | null;
   releaseDate: string | null;
   tmdbId: number | null;
+  imdbId?: string | null;
+  resolution?: string | null;
   guid: string | null;
   posterPath: string | null;
 }
 
-export interface PlexLibrary {
+export type PlexMovie = MediaServerMovie;
+
+export interface MediaServerLibrary {
   key: string;
   title: string;
   type: "movie";
 }
+
+export type PlexLibrary = MediaServerLibrary;
 
 export interface MovieResult {
   title: string;
@@ -84,7 +126,12 @@ export interface MovieDetails extends MovieResult {
   genres: string[];
   directors: string[];
   backdropPath: string | null;
+  logoPath: string | null;
   tagline: string | null;
+  tmdbRating: number | null;
+  tmdbVotes: number | null;
+  contentRating: string | null;
+  trailerKey: string | null;
   cast: MovieCastMember[];
 }
 
@@ -98,6 +145,7 @@ export interface MovieCollectionSummary {
   name: string;
   posterPath: string | null;
   backdropPath: string | null;
+  logoPath: string | null;
   ownedCount: number;
   missingCount: number;
   totalCount: number;

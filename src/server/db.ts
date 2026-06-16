@@ -4,7 +4,8 @@ import { DatabaseSync } from "node:sqlite";
 import { config } from "./config.js";
 import { DEFAULT_LOG_PATH } from "./services/logger.js";
 import { normalizeTitle } from "./services/normalize.js";
-import type { AppSettings, DownloadHistoryEntry, DownloaderType, MovieResult, PlexMovie } from "../shared/types.js";
+import { MEDIA_SERVER_TYPES } from "../shared/types.js";
+import type { AppSettings, DownloadHistoryEntry, DownloaderType, MediaServerMovie, MediaServerType, MovieResult } from "../shared/types.js";
 
 export interface CachedCollectionMovie {
   id: number;
@@ -20,14 +21,26 @@ export interface CachedCollection {
   name: string;
   posterPath: string | null;
   backdropPath: string | null;
+  logoPath: string | null;
   movies: CachedCollectionMovie[];
   updatedAt: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
+  mediaServerType: "plex",
   plexBaseUrl: "",
   plexToken: "",
+  jellyfinBaseUrl: "",
+  jellyfinApiKey: "",
+  jellyfinUserId: "",
+  embyBaseUrl: "",
+  embyApiKey: "",
+  embyUserId: "",
+  plexMachineId: "",
+  jellyfinServerId: "",
+  embyServerId: "",
   tmdbApiKey: "",
+  fanartApiKey: "",
   nzbHydraBaseUrl: "",
   nzbHydraApiKey: "",
   defaultQualities: ["1080p"],
@@ -55,11 +68,14 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS plex_movies (
     rating_key TEXT PRIMARY KEY,
+    media_server_type TEXT NOT NULL DEFAULT 'plex',
     title TEXT NOT NULL,
     normalized_title TEXT NOT NULL,
     year INTEGER,
     release_date TEXT,
     tmdb_id INTEGER,
+    imdb_id TEXT,
+    resolution TEXT,
     guid TEXT,
     poster_path TEXT,
     updated_at TEXT NOT NULL
@@ -89,23 +105,93 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_download_history_created_at ON download_history(created_at DESC);
 
   CREATE TABLE IF NOT EXISTS movie_collection_map (
-    tmdb_id INTEGER PRIMARY KEY,
+    media_server_type TEXT NOT NULL DEFAULT 'plex',
+    tmdb_id INTEGER NOT NULL,
     collection_id INTEGER,
     collection_name TEXT,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (media_server_type, tmdb_id)
   );
-
-  CREATE INDEX IF NOT EXISTS idx_movie_collection_map_collection_id ON movie_collection_map(collection_id);
 
   CREATE TABLE IF NOT EXISTS tmdb_collections (
     collection_id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     poster_path TEXT,
     backdrop_path TEXT,
+    logo_path TEXT,
+    fanart_checked_at TEXT,
     movies_json TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
 `);
+
+ensureColumn("plex_movies", "media_server_type", "TEXT NOT NULL DEFAULT 'plex'");
+ensureColumn("plex_movies", "imdb_id", "TEXT");
+ensureColumn("plex_movies", "resolution", "TEXT");
+ensureColumn("tmdb_collections", "logo_path", "TEXT");
+ensureColumn("tmdb_collections", "fanart_checked_at", "TEXT");
+ensureMovieCollectionMapSchema();
+
+function ensureColumn(table: string, column: string, definition: string) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!columns.some((entry) => entry.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+function ensureMovieCollectionMapSchema() {
+  const columns = db.prepare("PRAGMA table_info(movie_collection_map)").all() as Array<{ name: string; pk: number }>;
+  const hasServerType = columns.some((entry) => entry.name === "media_server_type");
+  const primaryKeys = columns.filter((entry) => entry.pk > 0).map((entry) => entry.name);
+  if (hasServerType && primaryKeys.includes("media_server_type") && primaryKeys.includes("tmdb_id")) {
+    db.exec("DROP INDEX IF EXISTS idx_movie_collection_map_collection_id");
+    db.exec("CREATE INDEX idx_movie_collection_map_collection_id ON movie_collection_map(media_server_type, collection_id)");
+    return;
+  }
+
+  const fallbackServerType = readStoredMediaServerType();
+  db.exec("ALTER TABLE movie_collection_map RENAME TO movie_collection_map_old");
+  db.exec("DROP INDEX IF EXISTS idx_movie_collection_map_collection_id");
+  db.exec(`
+    CREATE TABLE movie_collection_map (
+      media_server_type TEXT NOT NULL DEFAULT 'plex',
+      tmdb_id INTEGER NOT NULL,
+      collection_id INTEGER,
+      collection_name TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (media_server_type, tmdb_id)
+    );
+  `);
+
+  const oldColumns = db.prepare("PRAGMA table_info(movie_collection_map_old)").all() as Array<{ name: string }>;
+  if (oldColumns.some((entry) => entry.name === "media_server_type")) {
+    db.exec(`
+      INSERT OR REPLACE INTO movie_collection_map (media_server_type, tmdb_id, collection_id, collection_name, updated_at)
+      SELECT media_server_type, tmdb_id, collection_id, collection_name, updated_at
+      FROM movie_collection_map_old
+    `);
+  } else {
+    db.prepare(`
+      INSERT OR REPLACE INTO movie_collection_map (media_server_type, tmdb_id, collection_id, collection_name, updated_at)
+      SELECT ?, tmdb_id, collection_id, collection_name, updated_at
+      FROM movie_collection_map_old
+    `).run(fallbackServerType);
+  }
+
+  db.exec("DROP TABLE movie_collection_map_old");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_movie_collection_map_collection_id ON movie_collection_map(media_server_type, collection_id)");
+}
+
+function readStoredMediaServerType(): MediaServerType {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get("app") as { value: string } | undefined;
+  if (!row) return DEFAULT_SETTINGS.mediaServerType;
+  try {
+    const type = (JSON.parse(row.value) as Partial<AppSettings>).mediaServerType;
+    return MEDIA_SERVER_TYPES.includes(type as MediaServerType) ? (type as MediaServerType) : DEFAULT_SETTINGS.mediaServerType;
+  } catch {
+    return DEFAULT_SETTINGS.mediaServerType;
+  }
+}
 
 export function getSettings(): AppSettings {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get("app") as
@@ -123,6 +209,18 @@ export function saveSettings(settings: AppSettings): AppSettings {
   return merged;
 }
 
+export function clearScannedMediaState(serverType: MediaServerType = activeMediaServerType()): void {
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM plex_movies WHERE media_server_type = ?").run(serverType);
+    db.prepare("DELETE FROM movie_collection_map WHERE media_server_type = ?").run(serverType);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 function normalizeSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
@@ -131,29 +229,42 @@ function normalizeSettings(settings: AppSettings): AppSettings {
   };
 }
 
-export function upsertPlexMovies(movies: PlexMovie[]): number {
+function activeMediaServerType() {
+  return getSettings().mediaServerType;
+}
+
+export function upsertPlexMovies(movies: MediaServerMovie[]): number {
   const now = new Date().toISOString();
   const stmt = db.prepare(`
     INSERT INTO plex_movies (
-      rating_key, title, normalized_title, year, release_date, tmdb_id, guid, poster_path, updated_at
+      rating_key, media_server_type, title, normalized_title, year, release_date, tmdb_id, imdb_id, resolution, guid, poster_path, updated_at
     ) VALUES (
-      @ratingKey, @title, @normalizedTitle, @year, @releaseDate, @tmdbId, @guid, @posterPath, @updatedAt
+      @ratingKey, @mediaServerType, @title, @normalizedTitle, @year, @releaseDate, @tmdbId, @imdbId, @resolution, @guid, @posterPath, @updatedAt
     )
     ON CONFLICT(rating_key) DO UPDATE SET
+      media_server_type = excluded.media_server_type,
       title = excluded.title,
       normalized_title = excluded.normalized_title,
       year = excluded.year,
       release_date = excluded.release_date,
       tmdb_id = excluded.tmdb_id,
+      imdb_id = excluded.imdb_id,
+      resolution = excluded.resolution,
       guid = excluded.guid,
       poster_path = excluded.poster_path,
       updated_at = excluded.updated_at
   `);
 
-  db.exec("BEGIN");
+    db.exec("BEGIN");
   try {
     for (const movie of movies) {
-      stmt.run({ ...movie, updatedAt: now });
+      stmt.run({
+        ...movie,
+        mediaServerType: movie.mediaServerType ?? "plex",
+        imdbId: movie.imdbId ?? null,
+        resolution: movie.resolution ?? null,
+        updatedAt: now
+      });
     }
     db.exec("COMMIT");
   } catch (error) {
@@ -163,11 +274,25 @@ export function upsertPlexMovies(movies: PlexMovie[]): number {
   return movies.length;
 }
 
+export function replaceMediaServerMovies(serverType: MediaServerType, movies: MediaServerMovie[]): number {
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM plex_movies WHERE media_server_type = ?").run(serverType);
+    db.prepare("DELETE FROM movie_collection_map WHERE media_server_type = ?").run(serverType);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return upsertPlexMovies(movies.map((movie) => ({ ...movie, mediaServerType: serverType })));
+}
+
 export function getLibraryStats() {
-  const count = db.prepare("SELECT COUNT(*) AS count FROM plex_movies").get() as { count: number };
+  const serverType = activeMediaServerType();
+  const count = db.prepare("SELECT COUNT(*) AS count FROM plex_movies WHERE media_server_type = ?").get(serverType) as { count: number };
   const updated = db
-    .prepare("SELECT MAX(updated_at) AS updatedAt FROM plex_movies")
-    .get() as { updatedAt: string | null };
+    .prepare("SELECT MAX(updated_at) AS updatedAt FROM plex_movies WHERE media_server_type = ?")
+    .get(serverType) as { updatedAt: string | null };
   return {
     movieCount: count.count,
     lastScannedAt: updated.updatedAt
@@ -175,15 +300,19 @@ export function getLibraryStats() {
 }
 
 export function listPlexMovieTmdbIds(): number[] {
+  const serverType = activeMediaServerType();
   const rows = db
-    .prepare("SELECT DISTINCT tmdb_id AS tmdbId FROM plex_movies WHERE tmdb_id IS NOT NULL ORDER BY tmdb_id")
-    .all() as Array<{ tmdbId: number }>;
+    .prepare("SELECT DISTINCT tmdb_id AS tmdbId FROM plex_movies WHERE tmdb_id IS NOT NULL AND media_server_type = ? ORDER BY tmdb_id")
+    .all(serverType) as Array<{ tmdbId: number }>;
   return rows.map((row) => row.tmdbId);
 }
 
 export function listMissingCollectionMapIds(tmdbIds: number[]): number[] {
   if (!tmdbIds.length) return [];
-  const existing = db.prepare("SELECT tmdb_id AS tmdbId FROM movie_collection_map").all() as Array<{ tmdbId: number }>;
+  const serverType = activeMediaServerType();
+  const existing = db
+    .prepare("SELECT tmdb_id AS tmdbId FROM movie_collection_map WHERE media_server_type = ?")
+    .all(serverType) as Array<{ tmdbId: number }>;
   const mapped = new Set(existing.map((row) => row.tmdbId));
   return tmdbIds.filter((tmdbId) => !mapped.has(tmdbId));
 }
@@ -192,11 +321,12 @@ export function upsertMovieCollectionMaps(
   maps: Array<{ tmdbId: number; collectionId: number | null; collectionName: string | null }>
 ): void {
   if (!maps.length) return;
+  const serverType = activeMediaServerType();
   const now = new Date().toISOString();
   const stmt = db.prepare(`
-    INSERT INTO movie_collection_map (tmdb_id, collection_id, collection_name, updated_at)
-    VALUES (@tmdbId, @collectionId, @collectionName, @updatedAt)
-    ON CONFLICT(tmdb_id) DO UPDATE SET
+    INSERT INTO movie_collection_map (media_server_type, tmdb_id, collection_id, collection_name, updated_at)
+    VALUES (@mediaServerType, @tmdbId, @collectionId, @collectionName, @updatedAt)
+    ON CONFLICT(media_server_type, tmdb_id) DO UPDATE SET
       collection_id = excluded.collection_id,
       collection_name = excluded.collection_name,
       updated_at = excluded.updated_at
@@ -205,7 +335,7 @@ export function upsertMovieCollectionMaps(
   db.exec("BEGIN");
   try {
     for (const map of maps) {
-      stmt.run({ ...map, updatedAt: now });
+      stmt.run({ ...map, mediaServerType: serverType, updatedAt: now });
     }
     db.exec("COMMIT");
   } catch (error) {
@@ -215,9 +345,15 @@ export function upsertMovieCollectionMaps(
 }
 
 export function listOwnedCollectionIds(): number[] {
+  const serverType = activeMediaServerType();
   const rows = db
-    .prepare("SELECT DISTINCT collection_id AS collectionId FROM movie_collection_map WHERE collection_id IS NOT NULL ORDER BY collection_name")
-    .all() as Array<{ collectionId: number }>;
+    .prepare(
+      `SELECT DISTINCT collection_id AS collectionId
+       FROM movie_collection_map
+       WHERE collection_id IS NOT NULL AND media_server_type = ?
+       ORDER BY collection_name`
+    )
+    .all(serverType) as Array<{ collectionId: number }>;
   return rows.map((row) => row.collectionId);
 }
 
@@ -230,12 +366,14 @@ export function listMissingCollectionCacheIds(collectionIds: number[]): number[]
 
 export function upsertCollectionCache(collection: Omit<CachedCollection, "updatedAt">): void {
   db.prepare(
-    `INSERT INTO tmdb_collections (collection_id, name, poster_path, backdrop_path, movies_json, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO tmdb_collections (collection_id, name, poster_path, backdrop_path, logo_path, fanart_checked_at, movies_json, updated_at)
+     VALUES (?, ?, ?, ?, ?, NULL, ?, ?)
      ON CONFLICT(collection_id) DO UPDATE SET
        name = excluded.name,
        poster_path = excluded.poster_path,
        backdrop_path = excluded.backdrop_path,
+       logo_path = COALESCE(tmdb_collections.logo_path, excluded.logo_path),
+       fanart_checked_at = tmdb_collections.fanart_checked_at,
        movies_json = excluded.movies_json,
        updated_at = excluded.updated_at`
   ).run(
@@ -243,9 +381,33 @@ export function upsertCollectionCache(collection: Omit<CachedCollection, "update
     collection.name,
     collection.posterPath,
     collection.backdropPath,
+    collection.logoPath,
     JSON.stringify(collection.movies),
     new Date().toISOString()
   );
+}
+
+export function listCollectionsPendingFanart(collectionIds: number[]): number[] {
+  if (!collectionIds.length) return [];
+  const placeholders = collectionIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT collection_id AS collectionId
+       FROM tmdb_collections
+       WHERE collection_id IN (${placeholders})
+         AND fanart_checked_at IS NULL
+       ORDER BY collection_id`
+    )
+    .all(...collectionIds) as Array<{ collectionId: number }>;
+  return rows.map((row) => row.collectionId);
+}
+
+export function upsertCollectionFanart(collectionId: number, logoPath: string | null): void {
+  db.prepare(
+    `UPDATE tmdb_collections
+     SET logo_path = ?, fanart_checked_at = ?
+     WHERE collection_id = ?`
+  ).run(logoPath, new Date().toISOString(), collectionId);
 }
 
 export function listCachedCollections(collectionIds: number[]): CachedCollection[] {
@@ -253,7 +415,7 @@ export function listCachedCollections(collectionIds: number[]): CachedCollection
   const placeholders = collectionIds.map(() => "?").join(",");
   const rows = db
     .prepare(
-      `SELECT collection_id AS id, name, poster_path AS posterPath, backdrop_path AS backdropPath, movies_json AS moviesJson, updated_at AS updatedAt
+      `SELECT collection_id AS id, name, poster_path AS posterPath, backdrop_path AS backdropPath, logo_path AS logoPath, movies_json AS moviesJson, updated_at AS updatedAt
        FROM tmdb_collections
        WHERE collection_id IN (${placeholders})`
     )
@@ -262,6 +424,7 @@ export function listCachedCollections(collectionIds: number[]): CachedCollection
     name: string;
     posterPath: string | null;
     backdropPath: string | null;
+    logoPath: string | null;
     moviesJson: string;
     updatedAt: string;
   }>;
@@ -273,6 +436,7 @@ export function listCachedCollections(collectionIds: number[]): CachedCollection
       name: row.name,
       posterPath: row.posterPath,
       backdropPath: row.backdropPath,
+      logoPath: row.logoPath,
       movies: JSON.parse(row.moviesJson) as CachedCollectionMovie[],
       updatedAt: row.updatedAt
     }))
@@ -280,10 +444,11 @@ export function listCachedCollections(collectionIds: number[]): CachedCollection
 }
 
 export function matchMovie(movie: Omit<MovieResult, "owned" | "plexRatingKey" | "matchConfidence">): MovieResult {
+  const serverType = activeMediaServerType();
   if (movie.tmdbId) {
     const tmdbMatch = db
-      .prepare("SELECT rating_key AS ratingKey FROM plex_movies WHERE tmdb_id = ? LIMIT 1")
-      .get(movie.tmdbId) as { ratingKey: string } | undefined;
+      .prepare("SELECT rating_key AS ratingKey FROM plex_movies WHERE tmdb_id = ? AND media_server_type = ? LIMIT 1")
+      .get(movie.tmdbId, serverType) as { ratingKey: string } | undefined;
     if (tmdbMatch) {
       return { ...movie, owned: true, plexRatingKey: tmdbMatch.ratingKey, matchConfidence: "tmdb" };
     }
@@ -292,8 +457,8 @@ export function matchMovie(movie: Omit<MovieResult, "owned" | "plexRatingKey" | 
   const normalizedTitle = normalizeTitle(movie.title);
   if (movie.year) {
     const titleYearMatch = db
-      .prepare("SELECT rating_key AS ratingKey FROM plex_movies WHERE normalized_title = ? AND year = ? LIMIT 1")
-      .get(normalizedTitle, movie.year) as { ratingKey: string } | undefined;
+      .prepare("SELECT rating_key AS ratingKey FROM plex_movies WHERE normalized_title = ? AND year = ? AND media_server_type = ? LIMIT 1")
+      .get(normalizedTitle, movie.year, serverType) as { ratingKey: string } | undefined;
     if (titleYearMatch) {
       return {
         ...movie,

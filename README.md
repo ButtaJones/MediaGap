@@ -54,38 +54,39 @@ Most "what's missing from my library" tooling is built for set-and-forget automa
 
 ---
 
-## Run Locally
+## Getting Started
+
+You need [Node.js](https://nodejs.org) 22.5 or newer installed. Then:
 
 ```bash
 npm install
-npm run dev
-```
-
-Open the app at [http://localhost:5173](http://localhost:5173).
-The API runs at [http://localhost:4174](http://localhost:4174).
-
-## Build And Start
-
-```bash
 npm run build
 npm start
 ```
 
-To run on a custom port:
+Open **[http://localhost:4174](http://localhost:4174)** in your browser. That's it — the app and its API both run on this one address.
+
+To use a different port:
 
 ```bash
-PORT=4190 npm start
+PORT=8080 npm start
 ```
 
-## Optional Docker
+…then open `http://localhost:8080` instead.
 
-Docker is optional — the app is a regular Node/TypeScript project first.
+### Prefer Docker?
+
+Docker is optional, but if that's your thing:
 
 ```bash
 docker compose up --build
 ```
 
-Then open [http://localhost:4174](http://localhost:4174).
+Then open **[http://localhost:4174](http://localhost:4174)**.
+
+### Developing / modifying MediaGap
+
+Only needed if you want to edit the code with live reload. `npm run dev` starts the UI on `http://localhost:5173` (hot-reloading) and the API on `4174`. For just *running* the app, use the `npm start` steps above instead.
 
 ---
 

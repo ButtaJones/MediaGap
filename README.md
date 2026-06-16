@@ -46,7 +46,8 @@ Most "what's missing from my library" tooling is built for set-and-forget automa
 - Searches NZBHydra for missing movies with quality and source filters.
 - Sends selected NZBs to SABnzbd/NZBGet, or downloads checked releases as a ZIP.
 - Tracks downloader queue/history, with pause/resume controls.
-- Shows movie details, cast, director, posters, runtime, and IMDb ratings when available.
+- Rich movie detail view: backdrop, clearlogo title, IMDb/TMDb ratings, content rating, cast and director, trailer, and a one-click **Open in {server}** link for owned titles.
+- Clickable cast and director jump straight to that person's filmography with owned/missing overlaid; a "Part of: …" line links a movie to its franchise collection.
 - Writes local app/integration logs to `data/app.log` by default.
 
 > TV, Radarr, Sonarr, and direct per-indexer search are intentionally left for later versions.
@@ -93,6 +94,10 @@ Then open [http://localhost:4174](http://localhost:4174).
 ### Media Server
 
 For Plex, paste a Plex token manually in Settings. For Jellyfin or Emby, enter the server URL, API key, and user ID or exact username. Credentials are stored locally in SQLite on your machine.
+
+### Opening movies in your server
+
+Owned movies show an **Open in {server}** button that deep-links straight to that title in your media server's web UI. The link is built from the server URL you configured, so it works wherever that URL is reachable — on your local network if you used a local IP (e.g. `http://192.168.x.x:32400`), or remotely if you configured a public domain/DDNS address.
 
 ### Data
 

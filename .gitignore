@@ -10,3 +10,6 @@ data/*.db-*
 .DS_Store
 coverage
 *.log
+
+# Scaffolding for AI coding agents — not product (AGENTS.md stays tracked)
+TASK-*.md

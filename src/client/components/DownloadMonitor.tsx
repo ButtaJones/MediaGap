@@ -1,4 +1,4 @@
-import { Pause, Play, RefreshCw, Save, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Pause, Play, RefreshCw, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DownloadHistoryEntry, DownloaderStatusResponse } from "../../shared/types";
 import { api } from "../lib/api";
@@ -14,6 +14,8 @@ export function DownloadMonitor({ enabled, showHeading = true }: DownloadMonitor
   const [activeTab, setActiveTab] = useState<"queue" | "history">("queue");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const queueItems = status?.queue ?? [];
   const downloaderHistoryItems = status?.history ?? [];
 
@@ -70,9 +72,51 @@ export function DownloadMonitor({ enabled, showHeading = true }: DownloadMonitor
     try {
       await api.deleteHistory(id);
       setHistory((current) => current.filter((entry) => entry.id !== id));
+      deselect(id);
       setMessage("History entry removed.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not remove history entry.");
+    }
+  }
+
+  function deselect(id: number) {
+    setSelectedIds((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleSelected(id: number) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds((current) => {
+      const allChecked = history.length > 0 && history.every((entry) => current.has(entry.id));
+      return allChecked ? new Set() : new Set(history.map((entry) => entry.id));
+    });
+  }
+
+  async function deleteSelected() {
+    const ids = history.filter((entry) => selectedIds.has(entry.id)).map((entry) => entry.id);
+    if (!ids.length) return;
+    if (!window.confirm(`Delete ${ids.length} ${ids.length === 1 ? "entry" : "entries"}?`)) return;
+    setMessage("");
+    try {
+      await Promise.all(ids.map((id) => api.deleteHistory(id)));
+      const removed = new Set(ids);
+      setHistory((current) => current.filter((entry) => !removed.has(entry.id)));
+      setSelectedIds(new Set());
+      setMessage(`Removed ${ids.length} ${ids.length === 1 ? "entry" : "entries"}.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not remove selected history entries.");
     }
   }
 
@@ -132,39 +176,75 @@ export function DownloadMonitor({ enabled, showHeading = true }: DownloadMonitor
       />
 
       <div className="local-history">
-        <h3>Editable app history</h3>
-        {history.length ? (
-          <div className="history-list">
-            {history.map((entry) => (
-              <article className="history-row" key={entry.id}>
-                <div>
-                  <strong>{entry.title}</strong>
-                  <span>
-                    {entry.action} via {entry.downloader}
-                    {entry.category ? ` · ${entry.category}` : ""} · {new Date(entry.createdAt).toLocaleString()}
-                  </span>
-                </div>
-                <label>
-                  Status
-                  <input value={entry.status} onChange={(event) => patchEntry(entry.id, { status: event.target.value })} />
-                </label>
-                <label>
-                  Notes
-                  <input value={entry.notes} onChange={(event) => patchEntry(entry.id, { notes: event.target.value })} />
-                </label>
-                <div className="history-actions">
-                  <button className="secondary-button" onClick={() => updateEntry(entry)}>
-                    <Save size={16} />
-                    Save
-                  </button>
-                  <button className="secondary-button" onClick={() => deleteEntry(entry.id)}>
-                    <Trash2 size={16} />
-                    Delete
-                  </button>
-                </div>
-              </article>
-            ))}
-          </div>
+        <button
+          type="button"
+          className="local-history-header"
+          onClick={() => setHistoryCollapsed((current) => !current)}
+          aria-expanded={!historyCollapsed}
+        >
+          {historyCollapsed ? <ChevronRight size={18} /> : <ChevronDown size={18} />}
+          <h3>Editable app history</h3>
+          {history.length ? <span className="history-count">{history.length}</span> : null}
+        </button>
+
+        {historyCollapsed ? null : history.length ? (
+          <>
+            <div className="history-bulk-actions">
+              <label className="history-select-all">
+                <input
+                  type="checkbox"
+                  className="history-select"
+                  checked={history.every((entry) => selectedIds.has(entry.id))}
+                  onChange={toggleSelectAll}
+                />
+                Select all
+              </label>
+              <button className="secondary-button" onClick={deleteSelected} disabled={selectedIds.size === 0}>
+                <Trash2 size={16} />
+                Delete selected{selectedIds.size ? ` (${selectedIds.size})` : ""}
+              </button>
+            </div>
+            <div className="history-list">
+              {history.map((entry) => (
+                <article className={selectedIds.has(entry.id) ? "history-row selected" : "history-row"} key={entry.id}>
+                  <div className="history-row-head">
+                    <input
+                      type="checkbox"
+                      className="history-select"
+                      checked={selectedIds.has(entry.id)}
+                      onChange={() => toggleSelected(entry.id)}
+                      aria-label={`Select ${entry.title}`}
+                    />
+                    <div>
+                      <strong>{entry.title}</strong>
+                      <span>
+                        {entry.action} via {entry.downloader}
+                        {entry.category ? ` · ${entry.category}` : ""} · {new Date(entry.createdAt).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                  <label>
+                    Status
+                    <input value={entry.status} onChange={(event) => patchEntry(entry.id, { status: event.target.value })} />
+                  </label>
+                  <label>
+                    Notes
+                    <input value={entry.notes} onChange={(event) => patchEntry(entry.id, { notes: event.target.value })} />
+                  </label>
+                  <div className="history-actions">
+                    <button className="secondary-button" onClick={() => updateEntry(entry)}>
+                      <Save size={16} />
+                      Save
+                    </button>
+                    <button className="secondary-button" onClick={() => deleteEntry(entry.id)}>
+                      <Trash2 size={16} />
+                      Delete
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </>
         ) : (
           <p className="muted-line">No app download history yet. Sending or downloading NZBs will add entries here.</p>
         )}

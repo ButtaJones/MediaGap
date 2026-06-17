@@ -416,7 +416,9 @@ p {
   max-height: 220px;
   overflow: auto;
   margin: 0;
-  color: #263751;
+  /* Inherit the themed .log-viewer text color instead of a hardcoded navy,
+     which was invisible/off-theme on the dark themes. */
+  color: inherit;
   font-size: 0.78rem;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -1693,7 +1695,13 @@ button.cast-card {
 
 .download-status-meta {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.download-status-meta span {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .download-status-bar strong {
@@ -1800,6 +1808,13 @@ html[data-theme="dark"] .collection-toolbar .segmented-control span,
 html[data-theme="dark"] .tracker-tabs span {
   background: rgba(68, 199, 255, 0.12);
   color: #9ee3ff;
+}
+
+/* Inactive/unselected toggle + tab text: base color is a cool blue-slate meant
+   for the light theme. Re-theme it to each theme's muted text color so the
+   non-selected label isn't an off-theme blue. */
+html[data-theme="dark"] .segmented-control button {
+  color: #9fb1ca;
 }
 
 html[data-theme="dark"] .muted-line,
@@ -1983,6 +1998,10 @@ html[data-theme="plex"] .segmented-control button.selected {
   color: #ffbf3f;
 }
 
+html[data-theme="plex"] .segmented-control button {
+  color: #b9ad9a;
+}
+
 html[data-theme="plex"] .eyebrow,
 html[data-theme="plex"] .collection-toggle-button > svg,
 html[data-theme="plex"] .download-status-title > span {
@@ -2150,6 +2169,10 @@ html[data-theme="emby"] .segmented-control button.selected {
   color: #8df083;
 }
 
+html[data-theme="emby"] .segmented-control button {
+  color: #a8c8b8;
+}
+
 html[data-theme="emby"] :is(.eyebrow, .collection-toggle-button > svg, .download-status-title > span) {
   color: #52b54b;
 }
@@ -2308,6 +2331,10 @@ html[data-theme="jellyfin"] .segmented-control button.selected {
   color: #cdb2ff;
 }
 
+html[data-theme="jellyfin"] .segmented-control button {
+  color: #aeb6da;
+}
+
 html[data-theme="jellyfin"] :is(.eyebrow, .collection-toggle-button > svg, .download-status-title > span) {
   color: #aa5cff;
 }
@@ -2395,6 +2422,64 @@ html[data-theme="jellyfin"] :is(.details-director strong, .details-director .per
   color: #f7f8ff;
 }
 
+/* ============================================================================
+   GLOBAL BLUE SWEEP
+   Base rules below used hardcoded blue/blue-slate defaults for secondary text,
+   in-input icons, empty-state headings, footer/version text and the collection
+   icon. They had no per-theme override, so they leaked the light-theme blue
+   into dark/plex/emby/jellyfin. Re-themed here to each theme's muted text,
+   heading text, or accent as appropriate.
+   - muted text:  dark #9fb1ca, plex #b9ad9a, emby #a8c8b8, jellyfin #aeb6da
+   - heading:     dark #e6edf7, plex #f3eee4, emby #edf8ef, jellyfin #eef1ff
+   - accent icon: dark #44c7ff, plex #e5a00d, emby #52b54b, jellyfin #aa5cff
+   (.app-footer + .collection-search svg already had a dark override; the other
+   three themes are added here. light keeps its blue where blue is its accent.)
+   ============================================================================ */
+
+/* dark */
+html[data-theme="dark"] :is(.details-tagline, .details-director) {
+  color: #9fb1ca;
+}
+html[data-theme="dark"] .empty-state h3 {
+  color: #e6edf7;
+}
+html[data-theme="dark"] :is(.details-collection-line svg, .collection-toggle-button > svg) {
+  color: #44c7ff;
+}
+
+/* plex */
+html[data-theme="plex"] :is(.app-footer, .collection-search svg, .details-tagline, .details-director) {
+  color: #b9ad9a;
+}
+html[data-theme="plex"] .empty-state h3 {
+  color: #f3eee4;
+}
+html[data-theme="plex"] .details-collection-line svg {
+  color: #e5a00d;
+}
+
+/* emby */
+html[data-theme="emby"] :is(.app-footer, .collection-search svg, .details-tagline, .details-director) {
+  color: #a8c8b8;
+}
+html[data-theme="emby"] .empty-state h3 {
+  color: #edf8ef;
+}
+html[data-theme="emby"] .details-collection-line svg {
+  color: #52b54b;
+}
+
+/* jellyfin */
+html[data-theme="jellyfin"] :is(.app-footer, .collection-search svg, .details-tagline, .details-director) {
+  color: #aeb6da;
+}
+html[data-theme="jellyfin"] .empty-state h3 {
+  color: #eef1ff;
+}
+html[data-theme="jellyfin"] .details-collection-line svg {
+  color: #aa5cff;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -2451,6 +2536,11 @@ html[data-theme="jellyfin"] :is(.details-director strong, .details-director .per
   .result-control-fields,
   .result-page-actions {
     justify-content: stretch;
+  }
+
+  .result-control-fields label {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .tracker-grid,
@@ -2528,11 +2618,21 @@ html[data-theme="jellyfin"] :is(.details-director strong, .details-director .per
   .panel-heading,
   .connection-title,
   .drawer-toolbar,
-  .modal .settings-grid,
-  .movie-list-row {
+  .modal .settings-grid {
     align-items: stretch;
     flex-direction: column;
     grid-template-columns: 1fr;
+  }
+
+  /* Keep list rows horizontal on mobile: poster left, info beside it. */
+  .movie-list-row {
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 8px;
+  }
+
+  .movie-list-row .list-poster {
+    width: 52px;
   }
 
   nav {
@@ -2565,10 +2665,36 @@ html[data-theme="jellyfin"] :is(.details-director strong, .details-director .per
     gap: 8px;
     overflow: visible;
     padding: 10px;
-    border: 1px solid rgba(203, 215, 230, 0.92);
     border-radius: 8px;
+    /* Per-theme surface. Buttons inherit this `color`, so light gets a light
+       surface + dark text and each dark theme gets its own tinted surface +
+       light text — readable in every theme (the original bug was inherited
+       white header text on a white menu). */
+    border: 1px solid #d6dfed;
     background: rgba(255, 255, 255, 0.98);
-    box-shadow: 0 18px 46px rgba(9, 18, 40, 0.2);
+    color: #14213d;
+    box-shadow: 0 18px 46px rgba(9, 18, 40, 0.18);
+  }
+
+  html[data-theme="dark"] .nav-actions {
+    border-color: #233854;
+    background: #0f1d31;
+    color: #e6edf7;
+    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
+  }
+
+  html[data-theme="emby"] .nav-actions {
+    border-color: #244838;
+    background: #0d1f18;
+    color: #edf8ef;
+    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
+  }
+
+  html[data-theme="jellyfin"] .nav-actions {
+    border-color: #32396d;
+    background: #11152e;
+    color: #eef1ff;
+    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
   }
 
   .nav-actions.open {
@@ -2581,15 +2707,6 @@ html[data-theme="jellyfin"] :is(.details-director strong, .details-director .per
     justify-content: flex-start;
     padding: 0 10px;
     font-size: 0.9rem;
-  }
-
-  html[data-theme="dark"] .nav-actions,
-  html[data-theme="plex"] .nav-actions,
-  html[data-theme="emby"] .nav-actions,
-  html[data-theme="jellyfin"] .nav-actions {
-    border-color: #2f4564;
-    background: rgba(12, 27, 47, 0.98);
-    box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
   }
 
   .view-tools {

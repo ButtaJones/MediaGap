@@ -139,6 +139,11 @@ nav {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 18px;
+  /* Match the stats bar's effective width: the stats panel caps its content at
+     1320 with app-top's gutter OUTSIDE that cap. Mirror that here by capping the
+     workspace at 1320 + the gutters, so the panel content (Discovery) lines its
+     right edge up with the stats bar instead of being inset by the padding. */
+  width: min(100%, calc(1320px + 2 * clamp(18px, 4vw, 52px)));
   padding: 20px clamp(18px, 4vw, 52px) 46px;
 }
 

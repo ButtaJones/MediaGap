@@ -55,6 +55,18 @@ function nextThemeMode(current: ThemeMode): ThemeMode {
   return THEME_MODES[(currentIndex + 1) % THEME_MODES.length] ?? "light";
 }
 
+const THEME_LOGOS: Record<ThemeMode, string> = {
+  light: "/logo-main.png",
+  dark: "/logo-main.png",
+  plex: "/logo-plex.png",
+  emby: "/logo-emby.png",
+  jellyfin: "/logo-jellyfin.png"
+};
+
+function themeLogo(theme: ThemeMode): string {
+  return THEME_LOGOS[theme] ?? "/logo-main.png";
+}
+
 function initialPosterSize() {
   if (typeof window === "undefined") return 210;
   return window.innerWidth <= 700 ? 150 : 210;
@@ -377,7 +389,7 @@ export function App() {
       <section className="app-top">
         <nav>
           <div className="brand-mark">
-            <img className="brand-logo" src="/logo.png" alt="" />
+            <img className="brand-logo" src={themeLogo(settings.themeMode)} alt="" />
             <span>MediaGap</span>
           </div>
           <button

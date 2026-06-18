@@ -12,6 +12,8 @@ interface MovieDetailsModalProps {
   onSearchNzb: (movie: MovieResult) => void;
   onSearchPerson: (name: string) => void;
   onOpenCollection: (collectionId: number) => void;
+  onOpenTrailer: () => void;
+  hidden?: boolean;
   serverName: string;
 }
 
@@ -26,6 +28,8 @@ export function MovieDetailsModal({
   onSearchNzb,
   onSearchPerson,
   onOpenCollection,
+  onOpenTrailer,
+  hidden = false,
   serverName
 }: MovieDetailsModalProps) {
   if (!movie) return null;
@@ -38,6 +42,7 @@ export function MovieDetailsModal({
       role="dialog"
       aria-modal="true"
       aria-label={`${display.title} details`}
+      style={hidden ? { display: "none" } : undefined}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -140,15 +145,10 @@ export function MovieDetailsModal({
               </button>
             )}
             {details?.trailerKey ? (
-              <a
-                className="secondary-button details-trailer-button"
-                href={`https://www.youtube.com/watch?v=${details.trailerKey}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
+              <button className="secondary-button details-trailer-button" onClick={onOpenTrailer}>
                 <PlayCircle size={17} />
                 Trailer
-              </a>
+              </button>
             ) : null}
           </div>
 

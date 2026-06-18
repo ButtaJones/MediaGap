@@ -1415,6 +1415,160 @@ textarea:focus {
   color: #06131b;
 }
 
+/* Trailer modal — its OWN compact layout (NOT the detail modal's spacing).
+   The player is the hero; the meta is a tight supporting strip. The modal sizes
+   to its content (no dead space) and reuses the themed .modal surface + pills.
+   The 16:9 player is constrained by width AND viewport height so it never clips
+   in landscape, where the meta moves beside it and its pills wrap. */
+.trailer-backdrop {
+  z-index: 30;
+  place-items: center;
+  padding: 24px 16px;
+}
+
+.trailer-modal {
+  position: relative;
+  overflow: hidden;
+  width: min(760px, 100%);
+  padding: 16px;
+}
+
+.trailer-backdrop-image {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0.16;
+  pointer-events: none;
+}
+
+.trailer-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+}
+
+.trailer-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.trailer-player {
+  position: relative;
+  flex-shrink: 0;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+
+.trailer-player iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.trailer-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  text-align: center;
+  color: #fff;
+}
+
+.trailer-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+/* Tight, even spacing — kill the detail modal's large date<->rating gap. */
+.trailer-meta .details-meta {
+  margin: 0;
+}
+
+.trailer-meta .ratings-row {
+  margin-top: 0;
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.trailer-logo {
+  width: min(300px, 70%);
+  max-height: 74px;
+  margin: 0;
+}
+
+.trailer-meta h2 {
+  margin: 0;
+  font-size: clamp(1.25rem, 3vw, 1.8rem);
+  line-height: 1.05;
+}
+
+.trailer-youtube-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 1px;
+  color: inherit;
+  opacity: 0.78;
+  font-size: 0.84rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.trailer-youtube-link:hover,
+.trailer-youtube-link:focus-visible {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+@media (orientation: landscape) and (max-height: 600px) {
+  .trailer-backdrop {
+    padding: 8px;
+  }
+
+  .trailer-modal {
+    width: fit-content;
+    max-width: min(100%, 1040px);
+  }
+
+  .trailer-content {
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .trailer-player {
+    width: min(58vw, calc((100dvh - 44px) * 16 / 9));
+  }
+
+  .trailer-meta {
+    flex: 0 1 auto;
+    width: clamp(160px, 32vw, 300px);
+    max-height: calc(100dvh - 44px);
+    overflow-y: auto;
+  }
+
+  .trailer-logo {
+    max-height: 56px;
+  }
+}
+
 .details-body {
   display: grid;
   gap: 16px;

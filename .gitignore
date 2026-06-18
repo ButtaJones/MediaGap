@@ -13,3 +13,7 @@ coverage
 
 # Scaffolding for AI coding agents — not product (AGENTS.md stays tracked)
 TASK-*.md
+
+# Local macOS launchers — not product
+MediaGap.command
+MediaGap.app/

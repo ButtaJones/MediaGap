@@ -7,6 +7,7 @@ import { DownloadMonitor } from "./components/DownloadMonitor";
 import { MovieGrid } from "./components/MovieGrid";
 import { CollectionsView } from "./components/CollectionsView";
 import { MovieDetailsModal } from "./components/MovieDetailsModal";
+import { TrailerModal } from "./components/TrailerModal";
 import { NzbDrawer } from "./components/NzbDrawer";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { api } from "./lib/api";
@@ -89,6 +90,7 @@ export function App() {
   const [selectedMovie, setSelectedMovie] = useState<MovieResult | null>(null);
   const [detailMovie, setDetailMovie] = useState<MovieResult | null>(null);
   const [movieDetails, setMovieDetails] = useState<MovieDetails | null>(null);
+  const [trailerOpen, setTrailerOpen] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState("");
   const [collections, setCollections] = useState<MovieCollectionSummary[]>([]);
@@ -370,6 +372,7 @@ export function App() {
     setDetailMovie(null);
     setMovieDetails(null);
     setDetailsError("");
+    setTrailerOpen(false);
   }
 
   function searchPersonFromDetails(name: string) {
@@ -751,8 +754,12 @@ export function App() {
         }}
         onSearchPerson={searchPersonFromDetails}
         onOpenCollection={openCollectionFromDetails}
+        onOpenTrailer={() => setTrailerOpen(true)}
+        hidden={trailerOpen}
         serverName={activeServerName}
       />
+
+      {trailerOpen ? <TrailerModal movie={detailMovie} details={movieDetails} onClose={() => setTrailerOpen(false)} /> : null}
 
       <NzbDrawer
         movie={selectedMovie}

@@ -7,6 +7,7 @@ import { DownloadMonitor } from "./components/DownloadMonitor";
 import { MovieGrid } from "./components/MovieGrid";
 import { CollectionsView } from "./components/CollectionsView";
 import { MovieDetailsModal } from "./components/MovieDetailsModal";
+import { PersonResultHeader } from "./components/PersonResultHeader";
 import { TrailerModal } from "./components/TrailerModal";
 import { NzbDrawer } from "./components/NzbDrawer";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -575,6 +576,8 @@ export function App() {
           </div>
 
           {message ? <p className="status-line">{message}</p> : null}
+
+          {searchResponse.person ? <PersonResultHeader person={searchResponse.person} /> : null}
 
           <ResultControls
             total={sortedMovies.length}

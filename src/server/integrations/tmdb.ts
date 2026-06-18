@@ -23,6 +23,7 @@ import type {
   CollectionsResponse,
   MovieDetails,
   MovieResult,
+  PersonHeader,
   SearchSuggestion
 } from "../../shared/types.js";
 
@@ -152,6 +153,38 @@ interface TmdbCompany {
   name: string;
   logo_path?: string | null;
   origin_country?: string;
+}
+
+interface TmdbPersonDetails {
+  birthday?: string | null;
+  deathday?: string | null;
+  place_of_birth?: string | null;
+}
+
+interface PersonMeta {
+  birthday: string | null;
+  deathday: string | null;
+  placeOfBirth: string | null;
+}
+
+/** Birthday/deathday/place-of-birth for the person header. Cached in SQLite;
+ *  degrades to nulls (age line / flag omitted) if the endpoint fails or lacks data. */
+async function fetchPersonMeta(apiKey: string, id: number): Promise<PersonMeta> {
+  const key = `tmdb:personmeta:${id}`;
+  const cached = cacheGet<PersonMeta>(key);
+  if (cached) return cached;
+  try {
+    const person = await tmdbFetch<TmdbPersonDetails>(apiKey, `/person/${id}`);
+    const meta: PersonMeta = {
+      birthday: person.birthday ?? null,
+      deathday: person.deathday ?? null,
+      placeOfBirth: person.place_of_birth ?? null
+    };
+    cacheSet(key, meta);
+    return meta;
+  } catch {
+    return { birthday: null, deathday: null, placeOfBirth: null };
+  }
 }
 
 async function tmdbFetch<T>(apiKey: string, path: string, params: Record<string, string> = {}): Promise<T> {
@@ -732,28 +765,42 @@ async function loadImdbRatings() {
   return ratings;
 }
 
-export async function searchPersonCredits(apiKey: string, query: string): Promise<MovieResult[]> {
-  const key = `tmdb:person:${query}`;
-  const cached = cacheGet<TmdbMovie[]>(key);
-  if (cached) {
-    return sortMovies(cached.map(toMovieResult).filter(Boolean) as MovieResult[]);
-  }
-
+export async function searchPersonCredits(
+  apiKey: string,
+  query: string
+): Promise<{ results: MovieResult[]; person: PersonHeader | null }> {
   const people = await tmdbFetch<{ results: TmdbPerson[] }>(apiKey, "/search/person", {
     query,
     include_adult: "false"
   });
   const person = people.results[0];
-  if (!person) return [];
+  if (!person) return { results: [], person: null };
 
-  const credits = await tmdbFetch<{ cast: TmdbMovie[]; crew: TmdbMovie[] }>(apiKey, `/person/${person.id}/movie_credits`);
-  const deduped = new Map<number, TmdbMovie>();
-  for (const movie of [...credits.cast, ...credits.crew]) {
-    if (movie.id && !deduped.has(movie.id)) deduped.set(movie.id, movie);
+  const key = `tmdb:person:${query}`;
+  let movies = cacheGet<TmdbMovie[]>(key);
+  if (!movies) {
+    const credits = await tmdbFetch<{ cast: TmdbMovie[]; crew: TmdbMovie[] }>(apiKey, `/person/${person.id}/movie_credits`);
+    const deduped = new Map<number, TmdbMovie>();
+    for (const movie of [...credits.cast, ...credits.crew]) {
+      if (movie.id && !deduped.has(movie.id)) deduped.set(movie.id, movie);
+    }
+    movies = [...deduped.values()];
+    cacheSet(key, movies);
   }
-  const movies = [...deduped.values()];
-  cacheSet(key, movies);
-  return sortMovies(movies.map(toMovieResult).filter(Boolean) as MovieResult[]);
+
+  const meta = await fetchPersonMeta(apiKey, person.id);
+  const header: PersonHeader = {
+    id: person.id,
+    name: person.name,
+    profilePath: person.profile_path ? `${IMAGE_BASE}${person.profile_path}` : null,
+    birthday: meta.birthday,
+    deathday: meta.deathday,
+    placeOfBirth: meta.placeOfBirth,
+    knownFor:
+      person.known_for?.map((movie) => movie.title ?? movie.name).filter(Boolean).slice(0, 2).join(", ") || null
+  };
+
+  return { results: sortMovies(movies.map(toMovieResult).filter(Boolean) as MovieResult[]), person: header };
 }
 
 export async function searchCompanyMovies(apiKey: string, query: string): Promise<MovieResult[]> {

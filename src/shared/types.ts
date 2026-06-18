@@ -135,9 +135,21 @@ export interface MovieDetails extends MovieResult {
   cast: MovieCastMember[];
 }
 
+export interface PersonHeader {
+  id: number;
+  name: string;
+  profilePath: string | null;
+  birthday: string | null;
+  deathday: string | null;
+  placeOfBirth: string | null;
+  knownFor: string | null;
+}
+
 export interface SearchResponse {
   query: string;
   results: MovieResult[];
+  /** Present only for Person searches — drives the header above the results grid. */
+  person?: PersonHeader | null;
 }
 
 export interface MovieCollectionSummary {

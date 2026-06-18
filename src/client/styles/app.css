@@ -730,6 +730,86 @@ textarea:focus {
   font-size: 0.86rem;
 }
 
+/* Person result header — a themed card banner (reuses .panel surface): circular
+   photo on the left, then name + flag / age-or-lifespan / known-for stacked. */
+.person-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 14px 0 2px;
+  padding: 14px 16px;
+}
+
+.person-header-photo {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 76px;
+  height: 76px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(128, 128, 128, 0.16);
+}
+
+.person-header-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.person-header-body {
+  min-width: 0;
+}
+
+.person-header-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  /* Prominent but below the page heading (1.45rem); scales down on narrow screens
+     so a long name doesn't dominate on mobile. */
+  font-size: clamp(1.05rem, 2.6vw, 1.3rem);
+  line-height: 1.1;
+}
+
+.person-header-flag {
+  font-size: 1.05em;
+  line-height: 1;
+}
+
+.person-header-life {
+  margin: 5px 0 0;
+  font-size: 0.92rem;
+  opacity: 0.82;
+}
+
+.person-header-known {
+  margin: 4px 0 0;
+  font-size: 0.92rem;
+  opacity: 0.82;
+}
+
+.person-header-known-label {
+  font-weight: 800;
+  opacity: 0.72;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.78em;
+}
+
+@media (max-width: 620px) {
+  .person-header {
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .person-header-photo {
+    width: 60px;
+    height: 60px;
+  }
+}
+
 .empty-state {
   display: grid;
   place-items: center;
@@ -1566,6 +1646,22 @@ textarea:focus {
 
   .trailer-logo {
     max-height: 56px;
+  }
+
+  /* Keep the rating pills on ONE line in the narrow landscape column: shrink
+     them and drop the vote-count suffix so both stay fully visible. */
+  .trailer-meta .ratings-row {
+    flex-wrap: nowrap;
+  }
+
+  .trailer-meta .rating-pill {
+    gap: 5px;
+    padding: 3px 7px;
+    font-size: 0.8rem;
+  }
+
+  .trailer-meta .rating-pill small {
+    display: none;
   }
 }
 

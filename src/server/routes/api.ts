@@ -241,14 +241,18 @@ api.get("/search", async (req, res, next) => {
     const query = z.string().min(1).parse(req.query.q);
     const type = searchTypeSchema.parse(req.query.type ?? "person");
 
-    const results =
-      type === "person"
-        ? await searchPersonCredits(settings.tmdbApiKey, query)
-        : type === "studio"
-          ? await searchCompanyMovies(settings.tmdbApiKey, query)
-          : await searchMovies(settings.tmdbApiKey, query);
+    if (type === "person") {
+      const { results, person } = await searchPersonCredits(settings.tmdbApiKey, query);
+      res.json({ query, results, person });
+      return;
+    }
 
-    res.json({ query, results });
+    const results =
+      type === "studio"
+        ? await searchCompanyMovies(settings.tmdbApiKey, query)
+        : await searchMovies(settings.tmdbApiKey, query);
+
+    res.json({ query, results, person: null });
   } catch (error) {
     next(error);
   }

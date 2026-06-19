@@ -624,6 +624,12 @@ textarea:focus {
   color: #607089;
 }
 
+.muted-line a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .search-panel {
   min-width: 0;
 }

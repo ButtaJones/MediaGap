@@ -157,8 +157,8 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
         </ConnectionCard>
 
         <ConnectionCard
-          title="TMDb"
-          description="Used for filmographies, posters, release dates, ratings, and optional collection artwork."
+          title="TMDb (required)"
+          description="Required for MediaGap to work. Powers filmographies, posters, release dates, ratings, and optional collection artwork."
           onTest={() => test("tmdb")}
           result={connection.tmdb}
         >
@@ -166,6 +166,13 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
             API key
             <input value={draft.tmdbApiKey} onChange={(event) => update("tmdbApiKey", event.target.value)} placeholder="TMDb API key" />
           </label>
+          <p className="muted-line">
+            Required — MediaGap needs this to search and match movies. Get a free key at{" "}
+            <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer">
+              themoviedb.org
+            </a>{" "}
+            (Settings → API).
+          </p>
           <label>
             Fanart.tv API key optional
             <input

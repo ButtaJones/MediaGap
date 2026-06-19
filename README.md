@@ -66,6 +66,10 @@ npm start
 
 Open **[http://localhost:4174](http://localhost:4174)** in your browser. That's it. The app and its API both run on this one address.
 
+### Add a TMDb API key (required)
+
+MediaGap needs a free TMDb API key to search and match movies. Search, collections, and movie details all depend on it. To get one, make a free account at [themoviedb.org](https://www.themoviedb.org), then go to Settings → API and request a developer key. Paste that key into MediaGap's own Settings page (the TMDb card) and save. Do this before you try to use the app, or every lookup will fail.
+
 To use a different port:
 
 ```bash

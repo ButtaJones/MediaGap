@@ -30,6 +30,8 @@ const EMPTY_SETTINGS: AppSettings = {
   fanartApiKey: "",
   nzbHydraBaseUrl: "",
   nzbHydraApiKey: "",
+  seerrBaseUrl: "",
+  seerrApiKey: "",
   defaultQualities: ["1080p"],
   defaultSources: ["BluRay", "WEB-DL"],
   downloaderType: "none",
@@ -117,6 +119,7 @@ export function App() {
   const ownedCount = searchResponse.results.length - missingCount;
   const hasSearchRun = searchResponse.query.trim().length > 0;
   const activeServerName = mediaServerLabel(settings.mediaServerType);
+  const seerrEnabled = Boolean(settings.seerrBaseUrl && settings.seerrApiKey);
   const detailCollection = useMemo(() => {
     if (!detailMovie) return null;
     return collections.find((collection) => collection.movies.some((movie) => movie.tmdbId === detailMovie.tmdbId)) ?? null;
@@ -601,6 +604,7 @@ export function App() {
             onSearchNzb={openNzbSearch}
             onShowDetails={(movie) => void openMovieDetails(movie)}
             serverName={activeServerName}
+            seerrEnabled={seerrEnabled}
           />
 
           <ResultControls
@@ -629,6 +633,7 @@ export function App() {
             onSearchNzb={openNzbSearch}
             onShowDetails={(movie) => void openMovieDetails(movie)}
             serverName={activeServerName}
+            seerrEnabled={seerrEnabled}
             focusCollectionId={focusCollectionId}
             onFocusHandled={() => setFocusCollectionId(null)}
           />
@@ -760,6 +765,7 @@ export function App() {
         onOpenTrailer={() => setTrailerOpen(true)}
         hidden={trailerOpen}
         serverName={activeServerName}
+        seerrEnabled={seerrEnabled}
       />
 
       {trailerOpen ? <TrailerModal movie={detailMovie} details={movieDetails} onClose={() => setTrailerOpen(false)} /> : null}

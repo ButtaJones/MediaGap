@@ -43,6 +43,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   fanartApiKey: "",
   nzbHydraBaseUrl: "",
   nzbHydraApiKey: "",
+  seerrBaseUrl: "",
+  seerrApiKey: "",
   defaultQualities: ["1080p"],
   defaultSources: ["BluRay", "WEB-DL"],
   downloaderType: "none",

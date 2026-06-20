@@ -13,6 +13,7 @@ import type {
   MovieResult,
   NzbResult,
   NzbSearchResponse,
+  SeerrRequestResponse,
   MediaServerLibrary,
   ScanResponse,
   SearchResponse,
@@ -53,7 +54,7 @@ export const api = {
       body: JSON.stringify(settings)
     }),
   stats: () => request<{ movieCount: number; lastScannedAt: string | null }>("/stats"),
-  testConnection: (service: "media-server" | "plex" | "tmdb" | "nzbhydra" | "downloader", settings?: AppSettings) =>
+  testConnection: (service: "media-server" | "plex" | "tmdb" | "nzbhydra" | "seerr" | "downloader", settings?: AppSettings) =>
     request<ConnectionResult>(`/connections/${service}/test`, {
       method: "POST",
       body: settings ? JSON.stringify(settings) : undefined
@@ -92,6 +93,11 @@ export const api = {
       body: JSON.stringify({ title: movie.title, year: movie.year, qualities, sources, extraTerms, query, limit, offset })
     }),
   movieDetails: (tmdbId: number) => request<MovieDetails>(`/movies/${tmdbId}/details`),
+  requestSeerr: (movie: Pick<MovieResult, "tmdbId" | "title">) =>
+    request<SeerrRequestResponse>("/seerr/request", {
+      method: "POST",
+      body: JSON.stringify({ tmdbId: movie.tmdbId, title: movie.title })
+    }),
   sendToDownloader: (release: Pick<NzbResult, "link" | "title">, category: string) =>
     request<DownloaderSendResponse>("/downloader/send", {
       method: "POST",

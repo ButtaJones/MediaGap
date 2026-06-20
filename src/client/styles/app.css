@@ -860,7 +860,9 @@ textarea:focus {
 
 .movie-card {
   display: grid;
-  grid-template-rows: auto 156px auto;
+  /* Actions row is 1fr so it absorbs any extra height when the grid stretches cards to the
+     tallest in the row — keeps owned (1 action) and missing (2 actions) cards aligned. */
+  grid-template-rows: auto 156px 1fr;
   width: min(100%, var(--poster-size, 210px));
   min-width: 0;
   border: 1px solid #dde5ef;
@@ -1019,6 +1021,41 @@ textarea:focus {
 .movie-card .secondary-button {
   align-self: end;
   margin: 8px 12px 12px;
+}
+
+/* Poster cards: stack Search above the optional "Request in Seerr" button, each full card
+   width, so neither label truncates at any width or theme. Pinned to the bottom of the 1fr
+   row so buttons line up across the grid regardless of 1 vs 2 actions. */
+.movie-card .movie-actions {
+  display: flex;
+  flex-direction: column;
+  align-self: end;
+  gap: 8px;
+  margin: 8px 12px 12px;
+}
+
+.movie-card .movie-actions .secondary-button {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+
+/* List rows have horizontal room: keep the two actions side-by-side, wrapping if cramped. */
+.movie-list-row .movie-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Seerr request feedback mirrors the NZB send→checkmark: themed checkmark on success. */
+.seerr-request-button.requested {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.seerr-request-button.requested:disabled {
+  opacity: 1;
 }
 
 .movie-list {

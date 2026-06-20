@@ -49,6 +49,8 @@ export interface AppSettings {
   fanartApiKey: string;
   nzbHydraBaseUrl: string;
   nzbHydraApiKey: string;
+  seerrBaseUrl: string;
+  seerrApiKey: string;
   defaultQualities: QualityFilter[];
   defaultSources: SourceFilter[];
   downloaderType: DownloaderType;
@@ -224,6 +226,11 @@ export interface NzbSearchResponse {
 }
 
 export interface DownloaderSendResponse {
+  ok: boolean;
+  message: string;
+}
+
+export interface SeerrRequestResponse {
   ok: boolean;
   message: string;
 }

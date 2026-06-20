@@ -33,6 +33,7 @@ import {
   testTmdbConnection
 } from "../integrations/tmdb.js";
 import { searchNzbHydra, testNzbHydraConnection } from "../integrations/nzbhydra.js";
+import { requestSeerrMovie, testSeerrConnection } from "../integrations/seerr.js";
 import { appendLog, openLogFolder, readRecentLogs } from "../services/logger.js";
 import { fetchManyNzbs, safeFilename } from "../services/nzb.js";
 import { createZip } from "../services/zip.js";
@@ -58,6 +59,8 @@ const settingsSchema = z.object({
   fanartApiKey: z.string().default(""),
   nzbHydraBaseUrl: z.string(),
   nzbHydraApiKey: z.string(),
+  seerrBaseUrl: z.string().default(""),
+  seerrApiKey: z.string().default(""),
   defaultQualities: z.array(z.enum(QUALITY_FILTERS)).default(["1080p"]),
   defaultSources: z.array(z.enum(SOURCE_FILTERS)).default(["BluRay", "WEB-DL"]),
   downloaderType: z.enum(DOWNLOADER_TYPES).default("none"),
@@ -169,6 +172,13 @@ api.post("/connections/:service/test", async (req, res, next) => {
       const result = await testNzbHydraConnection(settings.nzbHydraBaseUrl, settings.nzbHydraApiKey);
       appendLog(settings.logPath, settings.loggingEnabled, "info", "NZBHydra connection test succeeded");
       res.json({ ok: true, message: "Connected to NZBHydra.", ...result });
+      return;
+    }
+    if (service === "seerr") {
+      if (!settings.seerrBaseUrl || !settings.seerrApiKey) throw new Error("Add Seerr URL and API key first.");
+      const result = await testSeerrConnection(settings.seerrBaseUrl, settings.seerrApiKey);
+      appendLog(settings.logPath, settings.loggingEnabled, "info", "Seerr connection test succeeded", { version: result.version });
+      res.json({ ok: true, message: `Connected to Seerr${result.version ? ` ${result.version}` : ""}.`, ...result });
       return;
     }
     if (service === "downloader") {
@@ -371,6 +381,35 @@ api.post("/nzbhydra/search", async (req, res, next) => {
   } catch (error) {
     const settings = getSettings();
     appendLog(settings.logPath, settings.loggingEnabled, "error", "NZBHydra search failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    next(error);
+  }
+});
+
+api.post("/seerr/request", async (req, res, next) => {
+  try {
+    const settings = getSettings();
+    if (!settings.seerrBaseUrl || !settings.seerrApiKey) {
+      throw new Error("Add Seerr URL and API key in Settings first.");
+    }
+
+    const body = z
+      .object({
+        tmdbId: z.number().int().positive(),
+        title: z.string().min(1).default("")
+      })
+      .parse(req.body);
+
+    await requestSeerrMovie(settings.seerrBaseUrl, settings.seerrApiKey, body.tmdbId);
+    appendLog(settings.logPath, settings.loggingEnabled, "info", "Requested movie in Seerr", {
+      tmdbId: body.tmdbId,
+      title: body.title
+    });
+    res.json({ ok: true, message: `Requested ${body.title || "movie"} in Seerr.` });
+  } catch (error) {
+    const settings = getSettings();
+    appendLog(settings.logPath, settings.loggingEnabled, "error", "Seerr request failed", {
       error: error instanceof Error ? error.message : String(error)
     });
     next(error);

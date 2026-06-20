@@ -12,6 +12,7 @@ interface CollectionsViewProps {
   onSearchNzb: (movie: MovieResult) => void;
   onShowDetails: (movie: MovieResult) => void;
   serverName: string;
+  seerrEnabled?: boolean;
   focusCollectionId?: number | null;
   onFocusHandled?: () => void;
 }
@@ -39,6 +40,7 @@ export function CollectionsView({
   onSearchNzb,
   onShowDetails,
   serverName,
+  seerrEnabled = false,
   focusCollectionId,
   onFocusHandled
 }: CollectionsViewProps) {
@@ -433,6 +435,7 @@ export function CollectionsView({
                 onSearchNzb={onSearchNzb}
                 onShowDetails={onShowDetails}
                 serverName={serverName}
+                seerrEnabled={seerrEnabled}
                 emptyTitle="No usable collection movies"
                 emptyDescription="Unreleased entries and movies without runtime are hidden from collection counts."
               />

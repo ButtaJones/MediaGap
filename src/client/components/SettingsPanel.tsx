@@ -73,7 +73,7 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
     }
   }
 
-  async function test(service: "media-server" | "tmdb" | "nzbhydra" | "downloader") {
+  async function test(service: "media-server" | "tmdb" | "nzbhydra" | "seerr" | "downloader") {
     setConnection((current) => ({ ...current, [service]: null }));
     try {
       const result = await api.testConnection(service, draft);
@@ -213,6 +213,29 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
             API key
             <input value={draft.nzbHydraApiKey} onChange={(event) => update("nzbHydraApiKey", event.target.value)} placeholder="NZBHydra API key" />
           </label>
+        </ConnectionCard>
+
+        <ConnectionCard
+          title="Seerr"
+          description="Request missing movies straight to Seerr (Overseerr/Jellyseerr), which hands them to Radarr."
+          onTest={() => test("seerr")}
+          result={connection.seerr}
+        >
+          <label>
+            Seerr URL
+            <input
+              value={draft.seerrBaseUrl}
+              onChange={(event) => update("seerrBaseUrl", event.target.value)}
+              placeholder="http://localhost:5055"
+            />
+          </label>
+          <label>
+            API key
+            <input value={draft.seerrApiKey} onChange={(event) => update("seerrApiKey", event.target.value)} placeholder="Seerr API key" />
+          </label>
+          <p className="muted-line">
+            Optional — when set, missing movies gain a “Request in Seerr” action. Generate the key in Seerr under Settings → General.
+          </p>
         </ConnectionCard>
 
         <ConnectionCard

@@ -1,5 +1,6 @@
 import { Calendar, Clock, Download, ExternalLink, Film, Layers, PlayCircle, UserRound, X } from "lucide-react";
 import type { MovieCollectionSummary, MovieDetails, MovieResult } from "../../shared/types";
+import { SeerrRequestButton } from "./SeerrRequestButton";
 
 interface MovieDetailsModalProps {
   movie: MovieResult | null;
@@ -15,6 +16,7 @@ interface MovieDetailsModalProps {
   onOpenTrailer: () => void;
   hidden?: boolean;
   serverName: string;
+  seerrEnabled?: boolean;
 }
 
 export function MovieDetailsModal({
@@ -30,7 +32,8 @@ export function MovieDetailsModal({
   onOpenCollection,
   onOpenTrailer,
   hidden = false,
-  serverName
+  serverName,
+  seerrEnabled = false
 }: MovieDetailsModalProps) {
   if (!movie) return null;
   const display = details ?? movie;
@@ -144,6 +147,7 @@ export function MovieDetailsModal({
                 Search
               </button>
             )}
+            {!display.owned && seerrEnabled ? <SeerrRequestButton movie={display} /> : null}
             {details?.trailerKey ? (
               <button className="secondary-button details-trailer-button" onClick={onOpenTrailer}>
                 <PlayCircle size={17} />

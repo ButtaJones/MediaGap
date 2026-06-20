@@ -1,6 +1,7 @@
 import { Download, Film, Search, Star } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { MovieResult } from "../../shared/types";
+import { SeerrRequestButton } from "./SeerrRequestButton";
 
 interface MovieGridProps {
   movies: MovieResult[];
@@ -9,6 +10,7 @@ interface MovieGridProps {
   onSearchNzb: (movie: MovieResult) => void;
   onShowDetails: (movie: MovieResult) => void;
   serverName: string;
+  seerrEnabled?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
 }
@@ -20,6 +22,7 @@ export function MovieGrid({
   onSearchNzb,
   onShowDetails,
   serverName,
+  seerrEnabled = false,
   emptyTitle = "Search a person, movie, or studio",
   emptyDescription = "Results will appear here with clear owned and missing states."
 }: MovieGridProps) {
@@ -65,17 +68,20 @@ export function MovieGrid({
               ) : null}
               {movie.overview ? <p className="overview compact">{movie.overview}</p> : null}
             </div>
-            <button
-              className="secondary-button"
-              onClick={(event) => {
-                event.stopPropagation();
-                onSearchNzb(movie);
-              }}
-              disabled={movie.owned}
-            >
-              <Download size={17} />
-              {movie.owned ? "Owned" : "Search"}
-            </button>
+            <div className="movie-actions">
+              <button
+                className="secondary-button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSearchNzb(movie);
+                }}
+                disabled={movie.owned}
+              >
+                <Download size={17} />
+                {movie.owned ? "Owned" : "Search"}
+              </button>
+              {seerrEnabled && !movie.owned ? <SeerrRequestButton movie={movie} stopPropagation /> : null}
+            </div>
           </article>
         ))}
       </div>
@@ -119,17 +125,20 @@ export function MovieGrid({
             ) : null}
             {movie.overview ? <p className="overview">{movie.overview}</p> : null}
           </div>
-          <button
-            className="secondary-button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onSearchNzb(movie);
-            }}
-            disabled={movie.owned}
-          >
-            <Download size={17} />
-            {movie.owned ? "Owned" : "Search"}
-          </button>
+          <div className="movie-actions">
+            <button
+              className="secondary-button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onSearchNzb(movie);
+              }}
+              disabled={movie.owned}
+            >
+              <Download size={17} />
+              {movie.owned ? "Owned" : "Search"}
+            </button>
+            {seerrEnabled && !movie.owned ? <SeerrRequestButton movie={movie} stopPropagation /> : null}
+          </div>
         </article>
       ))}
     </div>

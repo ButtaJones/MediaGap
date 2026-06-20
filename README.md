@@ -6,7 +6,7 @@
 
 <p><strong>Find the movies your media library is missing, then go get them.</strong></p>
 
-<p>A local, self-hosted web app that compares your library against TMDb, shows you the gaps as a poster wall, completes your franchises, and hands missing titles straight to NZBHydra.</p>
+<p>A local, self-hosted web app that compares your library against TMDb, shows you the gaps as a poster wall, completes your franchises, and hands missing titles off to NZBHydra or Seerr.</p>
 
 <p>
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" />
@@ -26,11 +26,11 @@
 
 ## Why MediaGap
 
-Most "what's missing from my library" tooling is built for set-and-forget automation. MediaGap is built for browsing. Search an actor, a studio, or a franchise, and see at a glance, as a wall of posters, what you own and what you're missing. Then send the gaps to your downloader in a couple of clicks.
+Most "what's missing from my library" tooling is built for set-and-forget automation. MediaGap is built for browsing. Search an actor, a studio, or a franchise, and see at a glance, as a wall of posters, what you own and what you're missing. Then send the gaps wherever you already work.
 
 - **Visual gap-finding.** Owned vs. missing at a glance, by person, movie, or studio. Not a config screen.
 - **Franchise completion.** MediaGap finds the collections you've started but not finished ("you own 2 of 4 John Wick") and surfaces the missing entries, with junk like unreleased announcements filtered out.
-- **Straight to your downloader.** Missing titles flow into NZBHydra with quality/source filters, then to SABnzbd/NZBGet or a ZIP. No copy-pasting.
+- **Send the gaps where you already work.** Missing titles can flow into NZBHydra with quality/source filters (then to SABnzbd/NZBGet or a ZIP), or get requested straight from your Seerr instance. No copy-pasting.
 
 > **Server support:** Plex, Jellyfin, and Emby are supported today. The library layer normalizes each server into the same local movie records.
 
@@ -45,12 +45,13 @@ Most "what's missing from my library" tooling is built for set-and-forget automa
 - Compares TMDb movie results with the local media-server scan and marks movies **owned** or **missing**.
 - Searches NZBHydra for missing movies with quality and source filters.
 - Sends selected NZBs to SABnzbd/NZBGet, or downloads checked releases as a ZIP.
+- Requests missing movies straight from your **Seerr** instance (the unified successor to Overseerr/Jellyseerr), which hands off to Radarr.
 - Tracks downloader queue/history, with pause/resume controls.
 - Rich movie detail view: backdrop, clearlogo title, IMDb/TMDb ratings, content rating, cast and director, trailer, and a one-click **Open in {server}** link for owned titles.
 - Clickable cast and director jump straight to that person's filmography with owned/missing overlaid. A "Part of: ..." line links a movie to its franchise collection.
 - Writes local app/integration logs to `data/app.log` by default.
 
-> TV, Radarr, Sonarr, and direct per-indexer search are intentionally left for later versions.
+> TV, Radarr/Sonarr direct, and per-indexer search are intentionally left for later versions.
 
 ---
 
@@ -104,6 +105,10 @@ For Plex, paste a Plex token manually in Settings. For Jellyfin or Emby, enter t
 
 Owned movies show an **Open in {server}** button that deep-links straight to that title in your media server's web UI. The link is built from the server URL you configured, so it works wherever that URL is reachable: on your local network if you used a local IP (e.g. `http://192.168.x.x:32400`), or remotely if you configured a public domain/DDNS address.
 
+### Requesting through Seerr
+
+If you run [Seerr](https://seerr.dev) (the unified successor to Overseerr and Jellyseerr), add its URL and API key in Settings. Missing movies then show a **Request** button that sends the request straight to Seerr, which hands it to Radarr. Entirely optional, the discovery side works without it.
+
 ### Data
 
 By default, local data is stored in `./data/app.db`. Set `DATABASE_PATH` to use another location.
@@ -122,6 +127,8 @@ The Collections view uses owned movies with TMDb IDs to find franchises you have
 
 - [x] Jellyfin library support
 - [x] Emby library support
+- [x] Seerr integration (request missing movies)
+- [ ] Trakt / Simkl watchlist comparison
 - [ ] "Discover" collections: browse famous franchises you own none of
 - [ ] Bulk "grab all missing" per collection
 - [ ] TV support (Sonarr)

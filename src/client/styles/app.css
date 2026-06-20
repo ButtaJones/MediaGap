@@ -1,10 +1,25 @@
 :root {
+  --accent: #188bd8;
   color: #14213d;
   background: #f5f7fb;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+}
+
+/* Per-theme accent (matches the documented accent-icon palette below). */
+html[data-theme="dark"] {
+  --accent: #44c7ff;
+}
+html[data-theme="plex"] {
+  --accent: #e5a00d;
+}
+html[data-theme="emby"] {
+  --accent: #52b54b;
+}
+html[data-theme="jellyfin"] {
+  --accent: #aa5cff;
 }
 
 * {
@@ -549,6 +564,10 @@ textarea:focus {
   border-color: #d6dfed;
   color: #14213d;
   background: #f5f8fc;
+  min-width: 92px;
+  /* Don't stretch to the title+description block height (varies per card); keep the
+     button at its own content height so every card's Test button is identical. */
+  align-self: flex-start;
 }
 
 .icon-button {
@@ -1158,6 +1177,9 @@ textarea:focus {
 
 .release-row {
   justify-content: space-between;
+  /* Pin checkbox + actions to the top so rows align identically whether the title
+     wraps to one line or two (centering made the left edge look ragged). */
+  align-items: flex-start;
   min-width: 0;
   border: 1px solid #dbe4ef;
   border-radius: 8px;
@@ -1167,9 +1189,13 @@ textarea:focus {
 }
 
 .release-checkbox {
-  width: auto;
+  /* Fixed column width so the title column always starts at the same x position. */
+  width: 16px;
+  height: 16px;
   min-height: 0;
   flex-shrink: 0;
+  /* Nudge down to sit on the first title line rather than the box's very top edge. */
+  margin-top: 3px;
 }
 
 .bulk-actions {
@@ -1196,6 +1222,19 @@ textarea:focus {
   min-height: 34px;
   color: #16213a;
   text-decoration: none;
+}
+
+/* Send-to-downloader per-row feedback: themed checkmark on success, muted while sending. */
+.icon-button.small.sent {
+  color: var(--accent);
+}
+
+.icon-button.small.sent:disabled {
+  opacity: 1;
+}
+
+.icon-button.small.sending {
+  opacity: 0.7;
 }
 
 .pager {

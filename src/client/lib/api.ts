@@ -118,6 +118,11 @@ export const api = {
   },
   recentLogs: () => request<LogResponse>("/logs/recent"),
   openLogFolder: () => request<{ ok: boolean; message: string }>("/logs/open-folder", { method: "POST" }),
+  downloaderCategories: (params?: { downloaderType?: string; downloaderBaseUrl?: string; downloaderApiKey?: string }) =>
+    request<{ categories: string[] }>("/downloader/categories", {
+      method: "POST",
+      body: JSON.stringify(params ?? {})
+    }),
   downloaderStatus: () => request<DownloaderStatusResponse>("/downloader/status"),
   pauseDownloader: () => request<{ ok: boolean; message: string }>("/downloader/control/pause", { method: "POST" }),
   resumeDownloader: () => request<{ ok: boolean; message: string }>("/downloader/control/resume", { method: "POST" }),

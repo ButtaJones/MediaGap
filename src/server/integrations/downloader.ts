@@ -75,6 +75,33 @@ export async function getDownloaderStatus(type: DownloaderType, baseUrl: string,
   };
 }
 
+// Best-effort fetch of the downloader's configured categories. Returns [] (never throws) so
+// the UI can fall back to a free-text field per AGENTS' graceful-fallback rule.
+export async function getDownloaderCategories(type: DownloaderType, baseUrl: string, apiKey: string): Promise<string[]> {
+  try {
+    if (type === "sabnzbd") {
+      const data = await sabApi<{ categories?: string[] }>(baseUrl, apiKey, "get_cats");
+      const categories = Array.isArray(data.categories) ? data.categories : [];
+      // SABnzbd lists "*" as the catch-all default; drop it and blanks/dupes.
+      return [...new Set(categories.filter((cat) => cat && cat !== "*"))];
+    }
+
+    if (type === "nzbget") {
+      const config = await nzbGetRpc(baseUrl, "config", []);
+      if (!Array.isArray(config)) return [];
+      const categories = config
+        .filter((entry): entry is { Name?: string; Value?: string } => typeof entry === "object" && entry !== null)
+        .filter((entry) => /^Category\d+\.Name$/.test(String(entry.Name)))
+        .map((entry) => String(entry.Value ?? "").trim())
+        .filter(Boolean);
+      return [...new Set(categories)];
+    }
+  } catch {
+    // Non-fatal: fall back to free text / default category.
+  }
+  return [];
+}
+
 export async function sendToDownloader(
   type: DownloaderType,
   baseUrl: string,

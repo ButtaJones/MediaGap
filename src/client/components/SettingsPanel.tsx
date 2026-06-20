@@ -12,6 +12,7 @@ import {
   type ConnectionResult
 } from "../../shared/types";
 import { api } from "../lib/api";
+import { CategorySelect } from "./CategorySelect";
 
 interface SettingsPanelProps {
   settings: AppSettings;
@@ -167,11 +168,15 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
             <input value={draft.tmdbApiKey} onChange={(event) => update("tmdbApiKey", event.target.value)} placeholder="TMDb API key" />
           </label>
           <p className="muted-line">
-            Required — MediaGap needs this to search and match movies. Get a free key at{" "}
-            <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer">
-              themoviedb.org
+            Required — MediaGap needs this to search and match movies.{" "}
+            <a href="https://www.themoviedb.org/signup" target="_blank" rel="noopener noreferrer">
+              Create a free account
             </a>{" "}
-            (Settings → API).
+            at themoviedb.org, then get a key under{" "}
+            <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer">
+              Settings → API
+            </a>
+            .
           </p>
           <label>
             Fanart.tv API key optional
@@ -181,7 +186,13 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
               placeholder="Fanart.tv API key for collection logos"
             />
           </label>
-          <p className="muted-line">Fanart is only used for franchise/collection artwork. Leave it blank to use TMDb art and text.</p>
+          <p className="muted-line">
+            Optional — Fanart is only used for franchise/collection artwork. Leave it blank to use TMDb art and text.{" "}
+            <a href="https://fanart.tv/get-an-api-key/" target="_blank" rel="noopener noreferrer">
+              Get a Fanart.tv key
+            </a>
+            .
+          </p>
         </ConnectionCard>
 
         <ConnectionCard
@@ -234,10 +245,12 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
           </label>
           <label>
             Default category
-            <input
+            <CategorySelect
               value={draft.downloaderDefaultCategory}
-              onChange={(event) => update("downloaderDefaultCategory", event.target.value)}
-              placeholder="movies"
+              onChange={(value) => update("downloaderDefaultCategory", value)}
+              downloaderType={draft.downloaderType}
+              downloaderBaseUrl={draft.downloaderBaseUrl}
+              downloaderApiKey={draft.downloaderApiKey}
             />
           </label>
         </ConnectionCard>

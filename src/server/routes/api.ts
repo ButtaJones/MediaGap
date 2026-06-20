@@ -11,7 +11,13 @@ import {
   saveSettings,
   updateHistoryEntry,
 } from "../db.js";
-import { controlDownloader, getDownloaderStatus, sendToDownloader, testDownloaderConnection } from "../integrations/downloader.js";
+import {
+  controlDownloader,
+  getDownloaderCategories,
+  getDownloaderStatus,
+  sendToDownloader,
+  testDownloaderConnection
+} from "../integrations/downloader.js";
 import type { MediaServer } from "../integrations/mediaServer.js";
 import { createMediaServer } from "../integrations/mediaServers.js";
 import {
@@ -513,6 +519,33 @@ api.post("/nzb/download-zip", async (req, res, next) => {
       error: error instanceof Error ? error.message : String(error)
     });
     next(error);
+  }
+});
+
+api.post("/downloader/categories", async (req, res) => {
+  // Best-effort: returns the downloader's configured categories so the category field can be a
+  // dropdown. Accepts optional draft downloader settings (so Settings can preview before saving);
+  // otherwise uses saved settings. Never hard-fails — returns [] so the UI falls back to free text.
+  try {
+    const saved = getSettings();
+    const body = z
+      .object({
+        downloaderType: z.enum(DOWNLOADER_TYPES).optional(),
+        downloaderBaseUrl: z.string().optional(),
+        downloaderApiKey: z.string().optional()
+      })
+      .parse(req.body ?? {});
+    const type = body.downloaderType ?? saved.downloaderType;
+    const baseUrl = body.downloaderBaseUrl ?? saved.downloaderBaseUrl;
+    const apiKey = body.downloaderApiKey ?? saved.downloaderApiKey;
+    if (type === "none" || !baseUrl) {
+      res.json({ categories: [] });
+      return;
+    }
+    const categories = await getDownloaderCategories(type, baseUrl, apiKey);
+    res.json({ categories });
+  } catch {
+    res.json({ categories: [] });
   }
 });
 

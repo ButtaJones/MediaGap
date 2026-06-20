@@ -770,6 +770,9 @@ export function App() {
         defaultSources={settings.defaultSources}
         defaultCategory={settings.downloaderDefaultCategory}
         downloaderEnabled={settings.downloaderType !== "none"}
+        downloaderType={settings.downloaderType}
+        downloaderBaseUrl={settings.downloaderBaseUrl}
+        downloaderApiKey={settings.downloaderApiKey}
         onClose={() => setSelectedMovie(null)}
       />
       <footer className="app-footer" aria-label="App version">

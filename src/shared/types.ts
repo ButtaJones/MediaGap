@@ -1,5 +1,5 @@
 export const QUALITY_FILTERS = ["SD", "720p", "1080p", "4K"] as const;
-export const SOURCE_FILTERS = ["BluRay", "WEB-DL", "WEBRip", "DVD", "REMUX"] as const;
+export const SOURCE_FILTERS = ["BluRay", "WEB-DL", "WEBRip", "DVD", "REMUX", "WEB", "DVDRip"] as const;
 export const DOWNLOADER_TYPES = ["none", "sabnzbd", "nzbget"] as const;
 export const THEME_MODES = ["light", "dark", "plex", "emby", "jellyfin"] as const;
 export const MEDIA_SERVER_TYPES = ["plex", "jellyfin", "emby"] as const;

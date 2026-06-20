@@ -1,7 +1,8 @@
-import { Download, Send, X } from "lucide-react";
+import { Check, Download, Loader2, Send, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { QUALITY_FILTERS, SOURCE_FILTERS, type MovieResult, type NzbResult } from "../../shared/types";
 import { api } from "../lib/api";
+import { CategorySelect } from "./CategorySelect";
 
 interface NzbDrawerProps {
   movie: MovieResult | null;
@@ -9,10 +10,23 @@ interface NzbDrawerProps {
   defaultSources: string[];
   defaultCategory: string;
   downloaderEnabled: boolean;
+  downloaderType: string;
+  downloaderBaseUrl: string;
+  downloaderApiKey: string;
   onClose: () => void;
 }
 
-export function NzbDrawer({ movie, defaultQualities, defaultSources, defaultCategory, downloaderEnabled, onClose }: NzbDrawerProps) {
+export function NzbDrawer({
+  movie,
+  defaultQualities,
+  defaultSources,
+  defaultCategory,
+  downloaderEnabled,
+  downloaderType,
+  downloaderBaseUrl,
+  downloaderApiKey,
+  onClose
+}: NzbDrawerProps) {
   const effectiveDefaultQualities = defaultQualities;
   const effectiveDefaultSources = defaultSources;
   const [qualities, setQualities] = useState<string[]>(effectiveDefaultQualities);
@@ -30,6 +44,7 @@ export function NzbDrawer({ movie, defaultQualities, defaultSources, defaultCate
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [selectedLinks, setSelectedLinks] = useState<string[]>([]);
+  const [sendState, setSendState] = useState<Record<string, "sending" | "sent">>({});
 
   useEffect(() => {
     setQualities(effectiveDefaultQualities);
@@ -43,6 +58,7 @@ export function NzbDrawer({ movie, defaultQualities, defaultSources, defaultCate
     setError("");
     setNotice("");
     setSelectedLinks([]);
+    setSendState({});
   }, [movie, defaultQualities, defaultSources, defaultCategory]);
 
   const sortedResults = useMemo(() => {
@@ -87,6 +103,7 @@ export function NzbDrawer({ movie, defaultQualities, defaultSources, defaultCate
       const response = await api.searchNzb(movie, qualities, sources, extraTerms, query, limit, nextOffset);
       setResults(response.results);
       setSelectedLinks([]);
+      setSendState({});
       setQuery(response.query);
       setOffset(response.offset);
       setLimit(response.limit);
@@ -101,11 +118,19 @@ export function NzbDrawer({ movie, defaultQualities, defaultSources, defaultCate
   async function sendRelease(result: NzbResult) {
     setError("");
     setNotice("");
+    setSendState((current) => ({ ...current, [result.link]: "sending" }));
     try {
       const response = await api.sendToDownloader(result, category);
       setNotice(response.message);
+      setSendState((current) => ({ ...current, [result.link]: "sent" }));
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Could not send release.");
+      // Drop back to the send state so the user can retry.
+      setSendState((current) => {
+        const next = { ...current };
+        delete next[result.link];
+        return next;
+      });
     }
   }
 
@@ -250,7 +275,13 @@ export function NzbDrawer({ movie, defaultQualities, defaultSources, defaultCate
 
       <label className="manual-query">
         Downloader category
-        <input value={category} onChange={(event) => setCategory(event.target.value)} placeholder="movies" />
+        <CategorySelect
+          value={category}
+          onChange={setCategory}
+          downloaderType={downloaderType}
+          downloaderBaseUrl={downloaderBaseUrl}
+          downloaderApiKey={downloaderApiKey}
+        />
       </label>
 
       <button className="primary-button wide" onClick={() => search(0)} disabled={loading}>
@@ -316,12 +347,25 @@ export function NzbDrawer({ movie, defaultQualities, defaultSources, defaultCate
                 <Download size={16} />
               </a>
               <button
-                className="icon-button small"
+                className={`icon-button small${sendState[result.link] ? ` ${sendState[result.link]}` : ""}`}
                 onClick={() => sendRelease(result)}
-                disabled={!downloaderEnabled}
-                title={downloaderEnabled ? "Send to downloader" : "Set up a downloader first"}
+                disabled={!downloaderEnabled || sendState[result.link] === "sending" || sendState[result.link] === "sent"}
+                title={
+                  sendState[result.link] === "sent"
+                    ? "Sent to downloader"
+                    : downloaderEnabled
+                      ? "Send to downloader"
+                      : "Set up a downloader first"
+                }
+                aria-label={sendState[result.link] === "sent" ? `Sent ${result.title}` : `Send ${result.title} to downloader`}
               >
-                <Send size={16} />
+                {sendState[result.link] === "sent" ? (
+                  <Check size={16} />
+                ) : sendState[result.link] === "sending" ? (
+                  <Loader2 size={16} className="spin" />
+                ) : (
+                  <Send size={16} />
+                )}
               </button>
             </div>
           </div>

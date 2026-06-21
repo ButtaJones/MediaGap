@@ -13,13 +13,15 @@ import {
 } from "../../shared/types";
 import { api } from "../lib/api";
 import { CategorySelect } from "./CategorySelect";
+import { TraktConnectionCard } from "./TraktConnectionCard";
 
 interface SettingsPanelProps {
   settings: AppSettings;
   onSaved: (settings: AppSettings) => void;
+  onTraktConnectedChange?: (connected: boolean) => void;
 }
 
-export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
+export function SettingsPanel({ settings, onSaved, onTraktConnectedChange }: SettingsPanelProps) {
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [status, setStatus] = useState<string>("");
   const [connection, setConnection] = useState<Record<string, ConnectionResult | null>>({});
@@ -237,6 +239,8 @@ export function SettingsPanel({ settings, onSaved }: SettingsPanelProps) {
             Optional — when set, missing movies gain a “Request in Seerr” action. Generate the key in Seerr under Settings → General.
           </p>
         </ConnectionCard>
+
+        <TraktConnectionCard onConnectedChange={onTraktConnectedChange} />
 
         <ConnectionCard
           title="Downloader"

@@ -3,6 +3,8 @@ import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import {
   addHistoryEntry,
+  cacheGet,
+  cacheSet,
   deleteHistoryEntry,
   getLibraryStats,
   getSettings,
@@ -25,6 +27,7 @@ import {
   getCollectionRefreshStatus,
   getDiscoverCollections,
   getMovieDetails,
+  getMoviesByTmdbIds,
   searchCompanyMovies,
   searchMovies,
   searchPersonCredits,
@@ -34,11 +37,12 @@ import {
 } from "../integrations/tmdb.js";
 import { searchNzbHydra, testNzbHydraConnection } from "../integrations/nzbhydra.js";
 import { requestSeerrMovie, testSeerrConnection } from "../integrations/seerr.js";
+import { disconnectTrakt, fetchTraktMovieTmdbIds, getTraktStatus, startTraktDeviceFlow } from "../integrations/trakt.js";
 import { appendLog, openLogFolder, readRecentLogs } from "../services/logger.js";
 import { fetchManyNzbs, safeFilename } from "../services/nzb.js";
 import { createZip } from "../services/zip.js";
 import { getAppMeta } from "../services/appMeta.js";
-import { DOWNLOADER_TYPES, MEDIA_SERVER_TYPES, QUALITY_FILTERS, SOURCE_FILTERS, THEME_MODES, mediaServerLabel } from "../../shared/types.js";
+import { DOWNLOADER_TYPES, MEDIA_SERVER_TYPES, QUALITY_FILTERS, SOURCE_FILTERS, THEME_MODES, TRAKT_SOURCE_LABELS, mediaServerLabel } from "../../shared/types.js";
 
 export const api = Router();
 
@@ -270,6 +274,76 @@ api.get("/search", async (req, res, next) => {
 
     res.json({ query, results, person: null });
   } catch (error) {
+    next(error);
+  }
+});
+
+api.get("/trakt/status", (_req, res, next) => {
+  try {
+    res.json(getTraktStatus());
+  } catch (error) {
+    next(error);
+  }
+});
+
+api.post("/trakt/connect", async (_req, res, next) => {
+  try {
+    const status = await startTraktDeviceFlow();
+    appendLog(getSettings().logPath, getSettings().loggingEnabled, "info", "Trakt device authorization started");
+    res.json(status);
+  } catch (error) {
+    const settings = getSettings();
+    appendLog(settings.logPath, settings.loggingEnabled, "error", "Trakt connect failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    next(error);
+  }
+});
+
+api.post("/trakt/disconnect", (_req, res, next) => {
+  try {
+    const status = disconnectTrakt();
+    const settings = getSettings();
+    appendLog(settings.logPath, settings.loggingEnabled, "info", "Trakt disconnected");
+    res.json(status);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Trakt watchlist/watched surfaced as a search source: returns the same SearchResponse shape as
+// /search so the existing results grid renders it with owned/missing overlaid. Fetches fresh from
+// Trakt on each call (a user action, not a render) and caches the TMDb id list in SQLite as a
+// fallback when Trakt is briefly unreachable.
+api.get("/trakt/:kind", async (req, res, next) => {
+  try {
+    const kind = z.enum(["watchlist", "watched"]).parse(req.params.kind);
+    const settings = requireSettings();
+    const cacheKey = `trakt:${kind}:ids`;
+
+    let ids: number[];
+    try {
+      ids = await fetchTraktMovieTmdbIds(kind);
+      cacheSet(cacheKey, ids);
+    } catch (error) {
+      const cached = cacheGet<number[]>(cacheKey);
+      if (!cached) throw error;
+      ids = cached;
+      appendLog(settings.logPath, settings.loggingEnabled, "warn", "Trakt fetch failed; served cached list", {
+        kind,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    const results = await getMoviesByTmdbIds(settings.tmdbApiKey, ids);
+    appendLog(settings.logPath, settings.loggingEnabled, "info", "Loaded Trakt list", { kind, count: results.length });
+    res.json({ query: TRAKT_SOURCE_LABELS[`trakt-${kind}`], results, person: null });
+  } catch (error) {
+    const settings = getSettings();
+    appendLog(settings.logPath, settings.loggingEnabled, "error", "Trakt list failed", {
+      kind: req.params.kind,
+      error: error instanceof Error ? error.message : String(error)
+    });
     next(error);
   }
 });

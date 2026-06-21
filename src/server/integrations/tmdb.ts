@@ -363,6 +363,23 @@ export async function searchMovies(apiKey: string, query: string): Promise<Movie
   return sortMovies(raw.map(toMovieResult).filter(Boolean) as MovieResult[]);
 }
 
+// Resolve a list of TMDb ids (e.g. a Trakt watchlist) into owned/missing-tagged MovieResults,
+// reusing the SQLite-cached movie details and the shared matching. Batched + best-effort: ids
+// that fail to resolve are dropped rather than failing the whole list.
+export async function getMoviesByTmdbIds(apiKey: string, tmdbIds: number[]): Promise<MovieResult[]> {
+  const uniqueIds = [...new Set(tmdbIds.filter((id) => Number.isFinite(id) && id > 0))];
+  const movies: MovieResult[] = [];
+  for (const batch of chunks(uniqueIds, 8)) {
+    const details = await Promise.allSettled(batch.map((tmdbId) => getMovieDetailsRaw(apiKey, tmdbId)));
+    for (const detail of details) {
+      if (detail.status !== "fulfilled") continue;
+      const movie = toMovieResult(detail.value);
+      if (movie) movies.push(movie);
+    }
+  }
+  return sortMovies(movies);
+}
+
 export async function getMovieDetails(apiKey: string, tmdbId: number): Promise<MovieDetails> {
   const raw = await getMovieDetailsRaw(apiKey, tmdbId);
 

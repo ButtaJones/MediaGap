@@ -570,6 +570,14 @@ textarea:focus {
   align-self: flex-start;
 }
 
+/* Trakt Connect/Disconnect labels are longer than "Test"; size them to their own content
+   instead of the uniform Test-button min-width, and don't let the title text squeeze them. */
+.settings-panel .ghost-button.trakt-connect-button {
+  min-width: auto;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .icon-button {
   justify-content: center;
   width: 42px;
@@ -647,6 +655,45 @@ textarea:focus {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+/* Trakt device-code authorization state inside its Settings connection card. */
+.trakt-pending {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.trakt-pending .muted-line,
+.trakt-pending .status-line {
+  margin: 0;
+}
+
+.trakt-pending .muted-line a,
+.trakt-pending .status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trakt-code {
+  align-self: flex-start;
+  border: 1px dashed var(--accent);
+  border-radius: 8px;
+  /* Theme-aware accent tint; falls back to no fill if color-mix is unsupported. */
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  padding: 8px 16px;
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+}
+
+.connection-card code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.86em;
 }
 
 .search-panel {

@@ -211,6 +211,37 @@ export function saveSettings(settings: AppSettings): AppSettings {
   return merged;
 }
 
+export interface TraktAuth {
+  accessToken: string;
+  refreshToken: string;
+  /** ISO timestamp when the access token expires. */
+  expiresAt: string;
+  username: string | null;
+}
+
+// Trakt tokens live in the settings table under a separate key (NOT 'app'), so they are never
+// part of AppSettings and never returned by GET /settings — they must stay server-side only.
+export function getTraktAuth(): TraktAuth | null {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get("trakt") as { value: string } | undefined;
+  if (!row) return null;
+  try {
+    return JSON.parse(row.value) as TraktAuth;
+  } catch {
+    return null;
+  }
+}
+
+export function saveTraktAuth(auth: TraktAuth): TraktAuth {
+  db.prepare(
+    "INSERT INTO settings (key, value) VALUES ('trakt', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  ).run(JSON.stringify(auth));
+  return auth;
+}
+
+export function clearTraktAuth(): void {
+  db.prepare("DELETE FROM settings WHERE key = ?").run("trakt");
+}
+
 export function clearScannedMediaState(serverType: MediaServerType = activeMediaServerType()): void {
   db.exec("BEGIN");
   try {

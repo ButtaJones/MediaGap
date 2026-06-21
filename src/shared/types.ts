@@ -192,6 +192,28 @@ export interface CollectionsRefreshStatus {
   finishedAt: string | null;
 }
 
+export const TRAKT_SOURCES = ["trakt-watchlist", "trakt-watched"] as const;
+export type TraktSource = (typeof TRAKT_SOURCES)[number];
+
+export const TRAKT_SOURCE_LABELS: Record<TraktSource, string> = {
+  "trakt-watchlist": "Trakt Watchlist",
+  "trakt-watched": "Trakt Watched"
+};
+
+export interface TraktStatus {
+  /** Env credentials present — when false, hide all Trakt UI. */
+  configured: boolean;
+  connected: boolean;
+  username: string | null;
+  /** A device-code authorization is in progress (waiting for the user to enter the code). */
+  pending: boolean;
+  userCode: string | null;
+  verificationUrl: string | null;
+  /** ISO timestamp when the pending device code expires. */
+  expiresAt: string | null;
+  message: string | null;
+}
+
 export interface SearchSuggestion {
   id: number;
   type: "person" | "movie" | "studio";

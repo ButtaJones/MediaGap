@@ -1,7 +1,7 @@
 import { Activity, Database, Film, Grid2X2, List, Menu, Moon, RefreshCw, Search, Settings, Sun, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { THEME_MODES, mediaServerLabel, themeLabel } from "../shared/types";
-import type { AppMeta, AppSettings, MediaServerLibrary, MovieCollectionSummary, MovieDetails, MovieResult, SearchResponse, SearchSuggestion, ThemeMode } from "../shared/types";
+import { THEME_MODES, TRAKT_SOURCE_LABELS, mediaServerLabel, themeLabel } from "../shared/types";
+import type { AppMeta, AppSettings, MediaServerLibrary, MovieCollectionSummary, MovieDetails, MovieResult, SearchResponse, SearchSuggestion, ThemeMode, TraktSource } from "../shared/types";
 import { DownloadStatusBar } from "./components/DownloadStatusBar";
 import { DownloadMonitor } from "./components/DownloadMonitor";
 import { MovieGrid } from "./components/MovieGrid";
@@ -44,8 +44,13 @@ const EMPTY_SETTINGS: AppSettings = {
   refreshOnStart: false
 };
 
-type SearchType = "person" | "movie" | "studio";
+type TmdbSearchType = "person" | "movie" | "studio";
+type SearchType = TmdbSearchType | TraktSource;
 type MovieSort = "list" | "year" | "title" | "owned" | "missing";
+
+function isTraktSource(type: SearchType): type is TraktSource {
+  return type === "trakt-watchlist" || type === "trakt-watched";
+}
 
 const CLIENT_META: AppMeta = {
   version: __APP_VERSION__,
@@ -83,6 +88,7 @@ export function App() {
   const [stats, setStats] = useState<{ movieCount: number; lastScannedAt: string | null }>({ movieCount: 0, lastScannedAt: null });
   const [query, setQuery] = useState("");
   const [type, setType] = useState<SearchType>("person");
+  const [traktConnected, setTraktConnected] = useState(false);
   const [searchResponse, setSearchResponse] = useState<SearchResponse>({ query: "", results: [] });
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
@@ -152,9 +158,19 @@ export function App() {
     setMoviePage(0);
   }, [moviesPerPage, movieSort, movieSortDirection, searchResponse.results]);
 
+  // If Trakt disconnects while a Trakt source is selected, fall back to a normal search type
+  // so the dropdown and results don't reference an option that's no longer available.
+  useEffect(() => {
+    if (!traktConnected && isTraktSource(type)) {
+      setType("person");
+      setSearchResponse({ query: "", results: [] });
+      setQuery("");
+    }
+  }, [traktConnected, type]);
+
   useEffect(() => {
     const trimmed = query.trim();
-    if (!suggestionsOpen || trimmed.length < 2 || !settings.tmdbApiKey) {
+    if (!suggestionsOpen || trimmed.length < 2 || !settings.tmdbApiKey || isTraktSource(type)) {
       setSuggestions([]);
       setSuggestionsLoading(false);
       return;
@@ -164,7 +180,7 @@ export function App() {
     setSuggestionsLoading(true);
     const handle = window.setTimeout(() => {
       void api
-        .suggest(trimmed, type)
+        .suggest(trimmed, type as TmdbSearchType)
         .then((response) => {
           if (!cancelled) setSuggestions(response.suggestions);
         })
@@ -199,6 +215,7 @@ export function App() {
 
   async function bootstrap() {
     void api.meta().then(setApiMeta).catch(() => setApiMeta(null));
+    void api.traktStatus().then((status) => setTraktConnected(status.connected)).catch(() => setTraktConnected(false));
     void loadCollections();
     try {
       const [loadedSettings, loadedStats] = await Promise.all([api.settings(), api.stats()]);
@@ -253,7 +270,10 @@ export function App() {
       void loadCollections();
       if (loadedStats.movieCount > 0) {
         setMessage(`Switched to ${nextServerName}. Loaded ${loadedStats.movieCount.toLocaleString()} saved ${nextServerName} movies.`);
-        if (previousSearch) {
+        if (isTraktSource(previousType)) {
+          // Re-overlay the same Trakt list against the newly active server's owned/missing state.
+          await loadTraktSource(previousType);
+        } else if (previousSearch) {
           setLoading(true);
           const response = await api.search(previousSearch, previousType);
           setSearchResponse(response);
@@ -312,6 +332,10 @@ export function App() {
   }
 
   async function runSearch(searchQuery: string, searchType: SearchType) {
+    if (isTraktSource(searchType)) {
+      await loadTraktSource(searchType);
+      return;
+    }
     if (!searchQuery.trim()) return;
     setQuery(searchQuery);
     setType(searchType);
@@ -320,10 +344,33 @@ export function App() {
     setLoading(true);
     setMessage("");
     try {
-      const response = await api.search(searchQuery.trim(), searchType);
+      const response = await api.search(searchQuery.trim(), searchType as TmdbSearchType);
       setSearchResponse(response);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Search failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Load a Trakt watchlist/watched list into the shared results grid (a user action — not on
+  // every render). Owned/missing overlay and the Search/Seerr handoffs come for free via reuse.
+  async function loadTraktSource(source: TraktSource) {
+    setType(source);
+    setSuggestionsOpen(false);
+    setSuggestions([]);
+    setLoading(true);
+    setMessage("");
+    try {
+      const kind = source === "trakt-watched" ? "watched" : "watchlist";
+      const response = await api.traktList(kind);
+      setSearchResponse(response);
+      setQuery("");
+      if (!response.results.length) {
+        setMessage(`No movies found in your ${TRAKT_SOURCE_LABELS[source]}.`);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not load your Trakt list.");
     } finally {
       setLoading(false);
     }
@@ -531,16 +578,28 @@ export function App() {
               <select
                 value={type}
                 onChange={(event) => {
-                  setType(event.target.value as SearchType);
-                  setSuggestionsOpen(true);
+                  const nextType = event.target.value as SearchType;
+                  setType(nextType);
+                  if (isTraktSource(nextType)) {
+                    void loadTraktSource(nextType);
+                  } else {
+                    setSuggestionsOpen(true);
+                  }
                 }}
               >
                 <option value="person">Person</option>
                 <option value="movie">Movie</option>
                 <option value="studio">Studio</option>
+                {traktConnected ? (
+                  <>
+                    <option value="trakt-watchlist">Trakt Watchlist</option>
+                    <option value="trakt-watched">Trakt Watched</option>
+                  </>
+                ) : null}
               </select>
               <input
-                value={query}
+                value={isTraktSource(type) ? "" : query}
+                disabled={isTraktSource(type)}
                 onChange={(event) => {
                   setQuery(event.target.value);
                   setSuggestionsOpen(true);
@@ -548,11 +607,15 @@ export function App() {
                 onFocus={() => {
                   if (query.trim().length >= 2) setSuggestionsOpen(true);
                 }}
-                placeholder={searchPlaceholder(type, activeServerName)}
+                placeholder={
+                  isTraktSource(type)
+                    ? `Showing your ${TRAKT_SOURCE_LABELS[type]} — owned vs missing in ${activeServerName}`
+                    : searchPlaceholder(type, activeServerName)
+                }
               />
               <button className="primary-button" disabled={loading}>
                 <Search size={18} />
-                {loading ? "Searching" : "Search"}
+                {loading ? (isTraktSource(type) ? "Refreshing" : "Searching") : isTraktSource(type) ? "Refresh" : "Search"}
               </button>
             </form>
 
@@ -661,7 +724,11 @@ export function App() {
                 <X size={20} />
               </button>
             </div>
-            <SettingsPanel settings={settings} onSaved={(saved) => void handleSettingsSaved(saved)} />
+            <SettingsPanel
+              settings={settings}
+              onSaved={(saved) => void handleSettingsSaved(saved)}
+              onTraktConnectedChange={setTraktConnected}
+            />
           </div>
         </div>
       ) : null}

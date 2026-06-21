@@ -17,7 +17,8 @@ import type {
   MediaServerLibrary,
   ScanResponse,
   SearchResponse,
-  SearchSuggestion
+  SearchSuggestion,
+  TraktStatus
 } from "../../shared/types";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -73,6 +74,10 @@ export const api = {
     }),
   search: (query: string, type: "person" | "movie" | "studio") =>
     request<SearchResponse>(`/search?q=${encodeURIComponent(query)}&type=${type}`),
+  traktStatus: () => request<TraktStatus>("/trakt/status"),
+  traktConnect: () => request<TraktStatus>("/trakt/connect", { method: "POST" }),
+  traktDisconnect: () => request<TraktStatus>("/trakt/disconnect", { method: "POST" }),
+  traktList: (kind: "watchlist" | "watched") => request<SearchResponse>(`/trakt/${kind}`),
   suggest: (query: string, type: "person" | "movie" | "studio") =>
     request<{ query: string; suggestions: SearchSuggestion[] }>(`/suggest?q=${encodeURIComponent(query)}&type=${type}`),
   collections: () => request<CollectionsResponse>("/collections/continue"),

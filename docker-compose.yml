@@ -2,7 +2,9 @@ services:
   mediagap:
     build: .
     ports:
-      - "4174:4174"
+      # Publish to the host's localhost only (no auth in the app). Change to "4174:4174" to expose
+      # on the LAN, and only do that behind a reverse proxy with auth or a VPN.
+      - "127.0.0.1:4174:4174"
     environment:
       PORT: 4174
       DATABASE_PATH: /app/data/app.db

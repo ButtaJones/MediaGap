@@ -42,9 +42,30 @@ import { appendLog, openLogFolder, readRecentLogs } from "../services/logger.js"
 import { fetchManyNzbs, safeFilename } from "../services/nzb.js";
 import { createZip } from "../services/zip.js";
 import { getAppMeta } from "../services/appMeta.js";
-import { DOWNLOADER_TYPES, MEDIA_SERVER_TYPES, QUALITY_FILTERS, SOURCE_FILTERS, THEME_MODES, TRAKT_SOURCE_LABELS, mediaServerLabel } from "../../shared/types.js";
+import { DOWNLOADER_TYPES, MASKED_SECRET, MEDIA_SERVER_TYPES, QUALITY_FILTERS, SECRET_SETTING_KEYS, SOURCE_FILTERS, THEME_MODES, TRAKT_SOURCE_LABELS, mediaServerLabel } from "../../shared/types.js";
+import type { AppSettings } from "../../shared/types.js";
 
 export const api = Router();
+
+// Replace saved secrets with a mask before sending settings to the browser, so real API keys
+// never leave the server. Empty (unset) secrets are left empty so the UI can prompt for them.
+function maskSecrets(settings: AppSettings): AppSettings {
+  const masked = { ...settings };
+  for (const key of SECRET_SETTING_KEYS) {
+    if (masked[key]) masked[key] = MASKED_SECRET;
+  }
+  return masked;
+}
+
+// Reverse of maskSecrets for incoming settings: a field still equal to the mask means "unchanged",
+// so restore the stored value; any other value (including empty) is the user's new intent.
+function unmaskSecrets(incoming: AppSettings, stored: AppSettings): AppSettings {
+  const resolved = { ...incoming };
+  for (const key of SECRET_SETTING_KEYS) {
+    if (resolved[key] === MASKED_SECRET) resolved[key] = stored[key];
+  }
+  return resolved;
+}
 
 const settingsSchema = z.object({
   mediaServerType: z.enum(MEDIA_SERVER_TYPES).default("plex"),
@@ -116,20 +137,22 @@ api.get("/meta", (_req, res) => {
 });
 
 api.get("/settings", (_req, res) => {
-  res.json(getSettings());
+  res.json(maskSecrets(getSettings()));
 });
 
 api.put("/settings", (req, res) => {
   const parsed = settingsSchema.parse(req.body);
   const previous = getSettings();
+  // Restore any secret the client sent back as the mask (i.e. left unchanged in the form).
+  const resolved = unmaskSecrets(parsed, previous);
   // serverId / machineId are fetched and persisted server-side (on connection test
   // and scan); the settings form never edits them, so keep any stored value when the
   // incoming payload doesn't carry one — otherwise a plain Save would wipe the deep-link IDs.
   const saved = saveSettings({
-    ...parsed,
-    plexMachineId: parsed.plexMachineId || previous.plexMachineId,
-    jellyfinServerId: parsed.jellyfinServerId || previous.jellyfinServerId,
-    embyServerId: parsed.embyServerId || previous.embyServerId
+    ...resolved,
+    plexMachineId: resolved.plexMachineId || previous.plexMachineId,
+    jellyfinServerId: resolved.jellyfinServerId || previous.jellyfinServerId,
+    embyServerId: resolved.embyServerId || previous.embyServerId
   });
   if (previous.mediaServerType !== saved.mediaServerType) {
     appendLog(saved.logPath, saved.loggingEnabled, "info", "Media server changed; loaded that server's saved scan state", {
@@ -138,7 +161,7 @@ api.put("/settings", (req, res) => {
     });
   }
   appendLog(saved.logPath, saved.loggingEnabled, "info", "Settings saved");
-  res.json(saved);
+  res.json(maskSecrets(saved));
 });
 
 api.get("/stats", (_req, res) => {
@@ -147,7 +170,8 @@ api.get("/stats", (_req, res) => {
 
 api.post("/connections/:service/test", async (req, res, next) => {
   try {
-    const settings = req.body && Object.keys(req.body).length ? settingsSchema.parse(req.body) : getSettings();
+    const settings =
+      req.body && Object.keys(req.body).length ? unmaskSecrets(settingsSchema.parse(req.body), getSettings()) : getSettings();
     const service = req.params.service;
     if (service === "media-server" || service === "plex") {
       const server = createMediaServer(settings);
@@ -650,7 +674,9 @@ api.post("/downloader/categories", async (req, res) => {
       .parse(req.body ?? {});
     const type = body.downloaderType ?? saved.downloaderType;
     const baseUrl = body.downloaderBaseUrl ?? saved.downloaderBaseUrl;
-    const apiKey = body.downloaderApiKey ?? saved.downloaderApiKey;
+    // The draft key may be the mask (a saved key the form never received); fall back to the stored value.
+    const apiKey =
+      body.downloaderApiKey && body.downloaderApiKey !== MASKED_SECRET ? body.downloaderApiKey : saved.downloaderApiKey;
     if (type === "none" || !baseUrl) {
       res.json({ categories: [] });
       return;

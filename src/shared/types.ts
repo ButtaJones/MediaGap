@@ -63,6 +63,26 @@ export interface AppSettings {
   refreshOnStart: boolean;
 }
 
+// Secret settings fields. GET /settings returns MASKED_SECRET in place of any saved value so
+// real keys never reach the browser; the client round-trips the sentinel back unchanged, and the
+// server restores the stored value on save/test (clearing the field removes the key).
+export const SECRET_SETTING_KEYS = [
+  "plexToken",
+  "jellyfinApiKey",
+  "embyApiKey",
+  "tmdbApiKey",
+  "fanartApiKey",
+  "nzbHydraApiKey",
+  "seerrApiKey",
+  "downloaderApiKey"
+] as const;
+
+export type SecretSettingKey = (typeof SECRET_SETTING_KEYS)[number];
+
+// A fixed-length mask (does not reveal the real key length). Shown in the Settings field to mean
+// "a value is saved"; leave it to keep the key, clear it to remove, or type a new value to replace.
+export const MASKED_SECRET = "••••••••";
+
 export interface ConnectionResult {
   ok: boolean;
   name?: string;

@@ -95,6 +95,22 @@ Only needed if you want to edit the code with live reload. `npm run dev` starts 
 
 ---
 
+## Security
+
+MediaGap has no built-in authentication. It is a single-user tool that holds your API keys and tokens (TMDb, Plex, Seerr, Trakt, NZBHydra) and acts on your behalf, so treat access to it as access to those accounts.
+
+By default the server binds to `127.0.0.1` (localhost), so only your own machine can reach it. Do not expose it directly to the internet. If you want to reach it from other devices, put it behind a reverse proxy that adds authentication, use a VPN, or keep it on a trusted LAN only.
+
+To allow access from your LAN, set `HOST=0.0.0.0` when starting:
+
+```bash
+HOST=0.0.0.0 npm start
+```
+
+Only do this if you understand that anyone who can reach that address can use the app and read your stored keys, since there is no login. Never port-forward it straight to the internet.
+
+---
+
 ## Configuration
 
 ### Media Server

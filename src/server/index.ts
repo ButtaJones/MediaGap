@@ -1,4 +1,3 @@
-import cors from "cors";
 import express from "express";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,7 +6,9 @@ import { config } from "./config.js";
 import { api } from "./routes/api.js";
 
 const app = express();
-app.use(cors());
+// No CORS middleware: the built client is served same-origin by this server, and the Vite dev
+// server proxies /api, so cross-origin access is never needed. Omitting a wildcard
+// Access-Control-Allow-Origin keeps other websites the user visits from reading the API.
 app.use(express.json({ limit: "1mb" }));
 app.use("/api", api);
 app.use("/api", (req, res) => {
@@ -34,8 +35,15 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   res.status(400).json({ ok: false, message });
 });
 
-const server = app.listen(config.port, () => {
-  console.log(`MediaGap listening on http://localhost:${config.port}`);
+const server = app.listen(config.port, config.host, () => {
+  if (config.host === "127.0.0.1" || config.host === "localhost") {
+    console.log(`MediaGap listening on http://localhost:${config.port} (localhost only; set HOST=0.0.0.0 for LAN access)`);
+  } else {
+    console.log(
+      `MediaGap listening on http://${config.host}:${config.port} — WARNING: bound to a non-localhost address with NO authentication. ` +
+        `Only do this behind a reverse proxy with auth or a VPN; never port-forward it to the internet.`
+    );
+  }
 });
 
 process.on("SIGTERM", () => {

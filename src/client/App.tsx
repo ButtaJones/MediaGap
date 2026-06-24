@@ -5,6 +5,7 @@ import type { AppMeta, AppSettings, MediaServerLibrary, MovieCollectionSummary, 
 import { DownloadStatusBar } from "./components/DownloadStatusBar";
 import { DownloadMonitor } from "./components/DownloadMonitor";
 import { MovieGrid } from "./components/MovieGrid";
+import { ResultControls } from "./components/ResultControls";
 import { TvSearchView } from "./components/TvSearchView";
 import { CollectionsView } from "./components/CollectionsView";
 import { MovieDetailsModal } from "./components/MovieDetailsModal";
@@ -682,7 +683,14 @@ export function App() {
               {/* Surface app-level feedback (e.g. TV scan results) in TV mode; the movie branch
                   renders its own copy of `message` below, so movies are unaffected. */}
               {message ? <p className="status-line">{message}</p> : null}
-              <TvSearchView posterSize={posterSize} serverName={activeServerName} tmdbReady={Boolean(settings.tmdbApiKey)} />
+              <TvSearchView
+                posterSize={posterSize}
+                viewMode={viewMode}
+                serverName={activeServerName}
+                tmdbReady={Boolean(settings.tmdbApiKey)}
+                seerrEnabled={seerrEnabled}
+                traktConnected={traktConnected}
+              />
             </>
           ) : (
           <>
@@ -765,8 +773,10 @@ export function App() {
             page={safeMoviePage}
             pageCount={moviePageCount}
             perPage={moviesPerPage}
+            perPageLabel="Movies"
             sort={movieSort}
             direction={movieSortDirection}
+            sortOptions={MOVIE_SORT_OPTIONS}
             onPerPage={setMoviesPerPage}
             onSort={setMovieSort}
             onDirection={setMovieSortDirection}
@@ -790,8 +800,10 @@ export function App() {
             page={safeMoviePage}
             pageCount={moviePageCount}
             perPage={moviesPerPage}
+            perPageLabel="Movies"
             sort={movieSort}
             direction={movieSortDirection}
+            sortOptions={MOVIE_SORT_OPTIONS}
             onPerPage={setMoviesPerPage}
             onSort={setMovieSort}
             onDirection={setMovieSortDirection}
@@ -1057,81 +1069,10 @@ function searchPlaceholder(type: SearchType, serverName: string) {
   return `Search actors or directors, compare with ${serverName}, then find the gaps`;
 }
 
-function ResultControls({
-  total,
-  pageStart,
-  pageEnd,
-  page,
-  pageCount,
-  perPage,
-  sort,
-  direction,
-  compact = false,
-  onPerPage,
-  onSort,
-  onDirection,
-  onPage
-}: {
-  total: number;
-  pageStart: number;
-  pageEnd: number;
-  page: number;
-  pageCount: number;
-  perPage: number;
-  sort: MovieSort;
-  direction: "asc" | "desc";
-  compact?: boolean;
-  onPerPage: (value: number) => void;
-  onSort: (value: MovieSort) => void;
-  onDirection: (value: "asc" | "desc") => void;
-  onPage: (value: number) => void;
-}) {
-  if (!total) return null;
-
-  return (
-    <div className={compact ? "result-controls compact" : "result-controls"}>
-      <span>
-        Showing {pageStart}-{pageEnd} of {total}
-      </span>
-      <div className="result-control-fields">
-        <label>
-          Movies
-          <select value={perPage} onChange={(event) => onPerPage(Number(event.target.value))}>
-            <option value={10}>10</option>
-            <option value={25}>25</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
-        </label>
-        <label>
-          Sort
-          <select value={sort} onChange={(event) => onSort(event.target.value as MovieSort)}>
-            <option value="list">List order</option>
-            <option value="year">Year</option>
-            <option value="title">Title</option>
-            <option value="owned">Owned</option>
-            <option value="missing">Missing</option>
-          </select>
-        </label>
-        <label>
-          Order
-          <select value={direction} onChange={(event) => onDirection(event.target.value as "asc" | "desc")}>
-            <option value="asc">Asc</option>
-            <option value="desc">Desc</option>
-          </select>
-        </label>
-      </div>
-      <div className="result-page-actions">
-        <button className="secondary-button" onClick={() => onPage(Math.max(0, page - 1))} disabled={page === 0}>
-          Previous
-        </button>
-        <span>
-          Page {page + 1} of {pageCount}
-        </span>
-        <button className="secondary-button" onClick={() => onPage(Math.min(pageCount - 1, page + 1))} disabled={page >= pageCount - 1}>
-          Next
-        </button>
-      </div>
-    </div>
-  );
-}
+const MOVIE_SORT_OPTIONS = [
+  { value: "list", label: "List order" },
+  { value: "year", label: "Year" },
+  { value: "title", label: "Title" },
+  { value: "owned", label: "Owned" },
+  { value: "missing", label: "Missing" }
+] as const satisfies ReadonlyArray<{ value: MovieSort; label: string }>;

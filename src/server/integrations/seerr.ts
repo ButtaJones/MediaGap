@@ -39,3 +39,18 @@ export async function requestSeerrMovie(baseUrl: string, apiKey: string, tmdbId:
   if (!response.ok) throw new Error(await readErrorMessage(response));
   return { ok: true };
 }
+
+// TV request — same endpoint as movies, with mediaType "tv" and a `seasons` payload that is either
+// the string "all" or an array of season numbers (Seerr forwards to Sonarr). Mirrors requestSeerrMovie.
+export async function requestSeerrTv(baseUrl: string, apiKey: string, tmdbId: number, seasons: number[] | "all") {
+  const response = await fetch(seerrApiUrl(baseUrl, "request"), {
+    method: "POST",
+    headers: {
+      "X-Api-Key": apiKey,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ mediaType: "tv", mediaId: tmdbId, seasons })
+  });
+  if (!response.ok) throw new Error(await readErrorMessage(response));
+  return { ok: true };
+}

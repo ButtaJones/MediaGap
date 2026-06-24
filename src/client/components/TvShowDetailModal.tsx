@@ -10,6 +10,7 @@ import type {
 } from "../../shared/types";
 import { api } from "../lib/api";
 import { PosterLightbox } from "./PosterLightbox";
+import { SeerrRequestAction } from "./SeerrRequestButton";
 import { ownershipPercent, tvSeasonSummaryText } from "./TvShowGrid";
 
 interface TvShowDetailModalProps {
@@ -19,6 +20,7 @@ interface TvShowDetailModalProps {
   loading: boolean;
   error: string;
   serverName: string;
+  seerrEnabled?: boolean;
   onClose: () => void;
 }
 
@@ -63,7 +65,7 @@ function formatVotes(votes: number): string {
   return votes.toLocaleString();
 }
 
-export function TvShowDetailModal({ show, detail, loading, error, serverName, onClose }: TvShowDetailModalProps) {
+export function TvShowDetailModal({ show, detail, loading, error, serverName, seerrEnabled = false, onClose }: TvShowDetailModalProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [seasonState, setSeasonState] = useState<Record<number, SeasonLoadState>>({});
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -136,6 +138,12 @@ export function TvShowDetailModal({ show, detail, loading, error, serverName, on
       : status === "partial"
         ? { className: "inline-badge partial", label: "In progress" }
         : { className: "inline-badge missing", label: "Missing" };
+
+  // Seerr TV requests (only when Seerr is configured and the full detail has loaded). The show-level
+  // action requests every not-fully-owned eligible season at once — or "all" when the user owns none.
+  const canRequestSeerr = seerrEnabled && Boolean(detail);
+  const notOwnedSeasons = detail ? detail.seasons.filter((season) => season.status !== "complete").map((season) => season.seasonNumber) : [];
+  const requestAllSeasons: number[] | "all" = detail?.ownedSeasonCount === 0 ? "all" : notOwnedSeasons;
 
   return (
     <div
@@ -220,6 +228,17 @@ export function TvShowDetailModal({ show, detail, loading, error, serverName, on
         </div>
 
         <div className="tv-detail-body">
+          {canRequestSeerr && notOwnedSeasons.length ? (
+            <div className="details-actions tv-detail-actions">
+              <SeerrRequestAction
+                key={`all-${detail?.tmdbId}`}
+                onRequest={() => api.requestSeerrTv({ tmdbId: detail!.tmdbId, seasons: requestAllSeasons, title })}
+                idleLabel={`Request all missing season${notOwnedSeasons.length === 1 ? "" : "s"}`}
+                requestedLabel="Requested missing seasons"
+                ariaTitle={`${title} missing seasons`}
+              />
+            </div>
+          ) : null}
           <h3 className="tv-detail-subhead">Seasons</h3>
           {loading ? <p className="status-line">Loading seasons from TMDb...</p> : null}
           {error ? <p className="error-line">{error}</p> : null}
@@ -232,26 +251,39 @@ export function TvShowDetailModal({ show, detail, loading, error, serverName, on
               const isExpanded = expanded.has(season.seasonNumber);
               const load = seasonState[season.seasonNumber];
               return (
-                <article className={`tv-season-row ${season.status}${isExpanded ? " expanded" : ""}`} key={season.seasonNumber}>
+                <article
+                  className={`tv-season-row ${season.status}${isExpanded ? " expanded" : ""}`}
+                  key={`${detail?.tmdbId}-${season.seasonNumber}`}
+                >
                   <div className="tv-season-heading">
-                    <button
-                      className="tv-season-toggle"
-                      onClick={() => toggleSeason(season.seasonNumber)}
-                      aria-expanded={isExpanded}
-                    >
-                      <span className="tv-season-chevron">{isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}</span>
-                      <span className="tv-season-headline">
-                        <span className="tv-season-line">
-                          <span className="tv-season-name">
-                            {season.status === "complete" ? <Check size={16} className="tv-season-check" /> : null}
-                            <strong>Season {season.seasonNumber}</strong>
-                            {season.airYear ? <small>{season.airYear}</small> : null}
+                    <div className="tv-season-top">
+                      <button
+                        className="tv-season-toggle"
+                        onClick={() => toggleSeason(season.seasonNumber)}
+                        aria-expanded={isExpanded}
+                      >
+                        <span className="tv-season-chevron">{isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}</span>
+                        <span className="tv-season-headline">
+                          <span className="tv-season-line">
+                            <span className="tv-season-name">
+                              {season.status === "complete" ? <Check size={16} className="tv-season-check" /> : null}
+                              <strong>Season {season.seasonNumber}</strong>
+                              {season.airYear ? <small>{season.airYear}</small> : null}
+                            </span>
+                            <span className={seasonBadgeClass(season.status)}>{SEASON_BADGE_LABEL[season.status]}</span>
                           </span>
-                          <span className={seasonBadgeClass(season.status)}>{SEASON_BADGE_LABEL[season.status]}</span>
+                          <small className="tv-season-count">{seasonEpisodeText(season)}</small>
                         </span>
-                        <small className="tv-season-count">{seasonEpisodeText(season)}</small>
-                      </span>
-                    </button>
+                      </button>
+                      {canRequestSeerr && season.status !== "complete" ? (
+                        <SeerrRequestAction
+                          className="tv-season-request"
+                          onRequest={() => api.requestSeerrTv({ tmdbId: detail!.tmdbId, seasons: [season.seasonNumber], title })}
+                          idleLabel="Request"
+                          ariaTitle={`${title} Season ${season.seasonNumber}`}
+                        />
+                      ) : null}
+                    </div>
                     <div
                       className="collection-progress"
                       aria-label={`${season.ownedEpisodeCount} of ${season.episodeCount} episodes owned`}

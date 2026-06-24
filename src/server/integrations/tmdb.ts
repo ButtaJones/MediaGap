@@ -529,6 +529,11 @@ function toTvShowResult(raw: TmdbMovie, details: TmdbTvDetails, today: string): 
   const eligible = eligibleSummarySeasons(details, today);
   const ownedSeasonCount = eligible.filter((season) => (owned.get(season.season_number as number) ?? 0) >= 1).length;
   const totalSeasonCount = eligible.length;
+  // Eligible seasons the user owns no episode of — the card "quick Request" payload (the precise
+  // per-episode partial seasons stay in the modal's "Request all missing seasons").
+  const missingSeasonNumbers = eligible
+    .filter((season) => (owned.get(season.season_number as number) ?? 0) < 1)
+    .map((season) => season.season_number as number);
   return {
     tmdbId: details.id,
     title: raw.name ?? raw.title ?? details.name ?? "Untitled",
@@ -538,25 +543,46 @@ function toTvShowResult(raw: TmdbMovie, details: TmdbTvDetails, today: string): 
     ownedSeasonCount,
     totalSeasonCount,
     status: rollupStatus(ownedSeasonCount, totalSeasonCount),
-    inLibrary: owned.size > 0
+    inLibrary: owned.size > 0,
+    missingSeasonNumbers
   };
+}
+
+// A broad TV term ("star") has far more than one TMDb page of matches, but /search/tv only returns
+// 20 per page — so fetch a few pages to fill multiple paginated result pages. Capped so the per-show
+// ownership lookups below stay bounded.
+const TV_SEARCH_LIMIT = 50;
+const TV_SEARCH_MAX_PAGES = 3;
+
+async function fetchTvSearchPages(apiKey: string, query: string): Promise<TmdbMovie[]> {
+  const collected: TmdbMovie[] = [];
+  let totalPages = 1;
+  for (let page = 1; collected.length < TV_SEARCH_LIMIT && page <= totalPages && page <= TV_SEARCH_MAX_PAGES; page += 1) {
+    const response = await tmdbFetch<{ results?: TmdbMovie[]; total_pages?: number }>(apiKey, "/search/tv", {
+      query,
+      include_adult: "false",
+      page: String(page)
+    });
+    collected.push(...(response.results ?? []));
+    totalPages = response.total_pages ?? 1;
+  }
+  return collected;
 }
 
 // Search TV shows by title and tag each with ownership status. Raw TMDb hits are cached (owned data
 // is overlaid live so a fresh scan immediately changes the badges), and per-show detail lookups are
-// batched like the collections refresh so a search stays responsive.
+// batched like the collections refresh so a search stays responsive. (Cache key is versioned so the
+// old single-page, 20-result caches are bypassed.)
 export async function searchTvShows(apiKey: string, query: string): Promise<TvShowResult[]> {
-  const key = `tmdb:search-tv:${query}`;
+  const key = `tmdb:search-tv:2:${query}`;
   const cached = cacheGet<TmdbMovie[]>(key);
-  const raw =
-    cached ??
-    (await tmdbFetch<{ results: TmdbMovie[] }>(apiKey, "/search/tv", { query, include_adult: "false" })).results;
+  const raw = cached ?? (await fetchTvSearchPages(apiKey, query));
   if (!cached) cacheSet(key, raw);
 
   const today = todayIso();
-  const candidates = raw.filter((show) => show.id).slice(0, 20);
+  const candidates = raw.filter((show) => show.id).slice(0, TV_SEARCH_LIMIT);
   const results: TvShowResult[] = [];
-  for (const batch of chunks(candidates, 5)) {
+  for (const batch of chunks(candidates, 8)) {
     const settled = await Promise.allSettled(
       batch.map(async (show) => toTvShowResult(show, await getTvShowDetails(apiKey, show.id), today))
     );
@@ -662,6 +688,9 @@ export async function getTvShowDetailWithOwnership(apiKey: string, tmdbId: numbe
   seasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
   const ownedSeasonCount = seasons.filter((season) => season.ownedEpisodeCount >= 1).length;
   const totalSeasonCount = seasons.length;
+  // Seasons the user owns nothing of (same notion as the card field; the modal's "Request all
+  // missing seasons" additionally covers precise partial seasons via detail.seasons).
+  const missingSeasonNumbers = seasons.filter((season) => season.status === "missing").map((season) => season.seasonNumber);
 
   const [logoPath, imdbRating] = await Promise.all([logoPromise, imdbRatingPromise]);
   const primaryNetwork = details.networks?.[0] ?? null;
@@ -672,6 +701,7 @@ export async function getTvShowDetailWithOwnership(apiKey: string, tmdbId: numbe
     year: yearFromDate(details.first_air_date ?? null),
     posterPath: details.poster_path ? `${IMAGE_BASE}${details.poster_path}` : null,
     backdropPath: details.backdrop_path ? `${BACKDROP_BASE}${details.backdrop_path}` : null,
+    missingSeasonNumbers,
     logoPath,
     overview: details.overview,
     tagline: details.tagline || null,
@@ -771,6 +801,27 @@ export async function getMoviesByTmdbIds(apiKey: string, tmdbIds: number[]): Pro
     }
   }
   return sortMovies(movies);
+}
+
+// Resolve a list of TMDb show ids (e.g. a Trakt show watchlist) into ownership-tagged TvShowResults,
+// reusing the SAME rollup the TV search uses so Trakt results render identically in the TV grid.
+// Batched + best-effort: ids that fail to resolve are dropped rather than failing the whole list.
+export async function getTvShowsByTmdbIds(apiKey: string, tmdbIds: number[]): Promise<TvShowResult[]> {
+  const uniqueIds = [...new Set(tmdbIds.filter((id) => Number.isFinite(id) && id > 0))];
+  const today = todayIso();
+  const results: TvShowResult[] = [];
+  for (const batch of chunks(uniqueIds, 8)) {
+    const settled = await Promise.allSettled(
+      batch.map(async (tmdbId) => {
+        const details = await getTvShowDetails(apiKey, tmdbId);
+        return toTvShowResult({ id: details.id } as TmdbMovie, details, today);
+      })
+    );
+    for (const outcome of settled) {
+      if (outcome.status === "fulfilled") results.push(outcome.value);
+    }
+  }
+  return results;
 }
 
 export async function getMovieDetails(apiKey: string, tmdbId: number): Promise<MovieDetails> {

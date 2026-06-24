@@ -1070,10 +1070,11 @@ textarea:focus {
   margin: 8px 12px 12px;
 }
 
-/* Poster cards: stack Search above the optional "Request in Seerr" button, each full card
-   width, so neither label truncates at any width or theme. Pinned to the bottom of the 1fr
-   row so buttons line up across the grid regardless of 1 vs 2 actions. */
-.movie-card .movie-actions {
+/* Poster cards: stack the actions (Search/Request for movies; View details/Request for TV) each
+   full card width, so neither label truncates at any width or theme. Pinned to the bottom of the
+   1fr row so buttons line up across the grid regardless of how many actions a card has. */
+.movie-card .movie-actions,
+.tv-card .movie-actions {
   display: flex;
   flex-direction: column;
   align-self: end;
@@ -1081,7 +1082,8 @@ textarea:focus {
   margin: 8px 12px 12px;
 }
 
-.movie-card .movie-actions .secondary-button {
+.movie-card .movie-actions .secondary-button,
+.tv-card .movie-actions .secondary-button {
   width: 100%;
   min-width: 0;
   margin: 0;
@@ -1173,7 +1175,8 @@ textarea:focus {
    the X-of-Y season math. Ownership badges are solid-color so they read on all five themes. */
 
 .media-kind-toggle {
-  margin-bottom: 14px;
+  /* Breathing room under the section heading so the Movies/TV toggle doesn't crowd the title. */
+  margin: 18px 0 16px;
 }
 
 /* Solid-color ownership badges sitting over the poster (mirrors .badge.owned / .badge.missing). */
@@ -1187,7 +1190,9 @@ textarea:focus {
 
 .tv-card {
   display: grid;
-  grid-template-rows: auto 1fr;
+  /* poster, body, then a 1fr actions row that pins the buttons to the bottom so View details /
+     Request line up across the grid regardless of title length (mirrors the movie card). */
+  grid-template-rows: auto auto 1fr;
   width: min(100%, var(--poster-size, 210px));
   min-width: 0;
   border: 1px solid #dde5ef;
@@ -1230,16 +1235,6 @@ textarea:focus {
 
 .tv-card-status small {
   color: #5f6f87;
-  font-size: 0.84rem;
-  font-weight: 800;
-}
-
-.tv-card-cta {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  margin-top: 4px;
-  color: var(--accent);
   font-size: 0.84rem;
   font-weight: 800;
 }
@@ -1294,12 +1289,31 @@ textarea:focus {
   gap: 9px;
 }
 
+/* Toggle on the left, the optional Seerr "Request" action on the right; wraps on narrow screens. */
+.tv-season-top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.tv-season-request {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* Show-level "Request all missing seasons" action above the season list (reuses .details-actions). */
+.tv-detail-actions {
+  margin: 0 0 14px;
+}
+
 /* Accordion header: chevron + the Phase 2 summary (name/badge/count), full-width and clickable. */
 .tv-season-toggle {
   display: flex;
   align-items: center;
   gap: 9px;
-  width: 100%;
+  flex: 1 1 240px;
+  min-width: 0;
   border: 0;
   background: transparent;
   color: inherit;

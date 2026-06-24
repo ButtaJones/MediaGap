@@ -96,6 +96,7 @@ export const api = {
   traktConnect: () => request<TraktStatus>("/trakt/connect", { method: "POST" }),
   traktDisconnect: () => request<TraktStatus>("/trakt/disconnect", { method: "POST" }),
   traktList: (kind: "watchlist" | "watched") => request<SearchResponse>(`/trakt/${kind}`),
+  traktTvList: (kind: "watchlist" | "watched") => request<TvSearchResponse>(`/trakt/tv/${kind}`),
   suggest: (query: string, type: "person" | "movie" | "studio") =>
     request<{ query: string; suggestions: SearchSuggestion[] }>(`/suggest?q=${encodeURIComponent(query)}&type=${type}`),
   collections: () => request<CollectionsResponse>("/collections/continue"),
@@ -120,6 +121,11 @@ export const api = {
     request<SeerrRequestResponse>("/seerr/request", {
       method: "POST",
       body: JSON.stringify({ tmdbId: movie.tmdbId, title: movie.title })
+    }),
+  requestSeerrTv: (params: { tmdbId: number; seasons: number[] | "all"; title?: string }) =>
+    request<SeerrRequestResponse>("/seerr/request/tv", {
+      method: "POST",
+      body: JSON.stringify(params)
     }),
   sendToDownloader: (release: Pick<NzbResult, "link" | "title">, category: string) =>
     request<DownloaderSendResponse>("/downloader/send", {

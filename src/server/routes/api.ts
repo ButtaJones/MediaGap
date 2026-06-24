@@ -32,6 +32,7 @@ import {
   getMoviesByTmdbIds,
   getTvSeasonEpisodes,
   getTvShowDetailWithOwnership,
+  getTvShowsByTmdbIds,
   resolveTvLibraryTmdbIds,
   searchCompanyMovies,
   searchMovies,
@@ -43,8 +44,8 @@ import {
   testTmdbConnection
 } from "../integrations/tmdb.js";
 import { searchNzbHydra, testNzbHydraConnection } from "../integrations/nzbhydra.js";
-import { requestSeerrMovie, testSeerrConnection } from "../integrations/seerr.js";
-import { disconnectTrakt, fetchTraktMovieTmdbIds, getTraktStatus, startTraktDeviceFlow } from "../integrations/trakt.js";
+import { requestSeerrMovie, requestSeerrTv, testSeerrConnection } from "../integrations/seerr.js";
+import { disconnectTrakt, fetchTraktMovieTmdbIds, fetchTraktShowTmdbIds, getTraktStatus, startTraktDeviceFlow } from "../integrations/trakt.js";
 import { appendLog, openLogFolder, readRecentLogs } from "../services/logger.js";
 import { fetchManyNzbs, safeFilename } from "../services/nzb.js";
 import { createZip } from "../services/zip.js";
@@ -510,6 +511,43 @@ api.get("/trakt/:kind", async (req, res, next) => {
   }
 });
 
+// Trakt TV watchlist/watched as a TV source: returns the TvSearchResponse shape so the TV grid
+// renders it with ownership overlaid, exactly like a TV search. Same fresh-fetch + SQLite id-cache
+// fallback as the movie Trakt route. Registered as /trakt/tv/:kind (3 segments) so the 2-segment
+// movie route never captures it.
+api.get("/trakt/tv/:kind", async (req, res, next) => {
+  try {
+    const kind = z.enum(["watchlist", "watched"]).parse(req.params.kind);
+    const settings = requireSettings();
+    const cacheKey = `trakt:tv:${kind}:ids`;
+
+    let ids: number[];
+    try {
+      ids = await fetchTraktShowTmdbIds(kind);
+      cacheSet(cacheKey, ids);
+    } catch (error) {
+      const cached = cacheGet<number[]>(cacheKey);
+      if (!cached) throw error;
+      ids = cached;
+      appendLog(settings.logPath, settings.loggingEnabled, "warn", "Trakt TV fetch failed; served cached list", {
+        kind,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+
+    const results = await getTvShowsByTmdbIds(settings.tmdbApiKey, ids);
+    appendLog(settings.logPath, settings.loggingEnabled, "info", "Loaded Trakt TV list", { kind, count: results.length });
+    res.json({ query: TRAKT_SOURCE_LABELS[`trakt-${kind}`], results });
+  } catch (error) {
+    const settings = getSettings();
+    appendLog(settings.logPath, settings.loggingEnabled, "error", "Trakt TV list failed", {
+      kind: req.params.kind,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    next(error);
+  }
+});
+
 api.get("/suggest", async (req, res, next) => {
   try {
     const settings = requireSettings();
@@ -646,6 +684,43 @@ api.post("/seerr/request", async (req, res, next) => {
   } catch (error) {
     const settings = getSettings();
     appendLog(settings.logPath, settings.loggingEnabled, "error", "Seerr request failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    next(error);
+  }
+});
+
+// TV request: same Seerr endpoint as movies, with a `seasons` payload of specific season numbers or
+// the string "all". Key stays server-side. Mirrors the movie route's validation + error handling.
+api.post("/seerr/request/tv", async (req, res, next) => {
+  try {
+    const settings = getSettings();
+    if (!settings.seerrBaseUrl || !settings.seerrApiKey) {
+      throw new Error("Add Seerr URL and API key in Settings first.");
+    }
+
+    const body = z
+      .object({
+        tmdbId: z.number().int().positive(),
+        seasons: z.union([z.literal("all"), z.array(z.number().int().min(1)).min(1)]),
+        title: z.string().min(1).default("")
+      })
+      .parse(req.body);
+
+    await requestSeerrTv(settings.seerrBaseUrl, settings.seerrApiKey, body.tmdbId, body.seasons);
+    const seasonLabel =
+      body.seasons === "all"
+        ? "all seasons"
+        : `season${body.seasons.length === 1 ? "" : "s"} ${body.seasons.join(", ")}`;
+    appendLog(settings.logPath, settings.loggingEnabled, "info", "Requested TV in Seerr", {
+      tmdbId: body.tmdbId,
+      title: body.title,
+      seasons: body.seasons
+    });
+    res.json({ ok: true, message: `Requested ${body.title || "show"} (${seasonLabel}) in Seerr.` });
+  } catch (error) {
+    const settings = getSettings();
+    appendLog(settings.logPath, settings.loggingEnabled, "error", "Seerr TV request failed", {
       error: error instanceof Error ? error.message : String(error)
     });
     next(error);

@@ -273,6 +273,8 @@ export interface TvShowResult {
   status: TvOwnershipStatus;
   /** Whether the user has the show at all in the active server's library. */
   inLibrary: boolean;
+  /** Eligible seasons the user owns no episode of — the card-level "quick Request" payload. */
+  missingSeasonNumbers: number[];
 }
 
 export interface TvShowDetail extends TvShowResult {

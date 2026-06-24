@@ -244,3 +244,20 @@ export async function fetchTraktMovieTmdbIds(kind: "watchlist" | "watched"): Pro
   }
   return ids;
 }
+
+// TV equivalent of fetchTraktMovieTmdbIds: the user's Trakt show watchlist / watched list. Each item
+// carries show.ids.tmdb — MediaGap's common key — so the caller runs these through the TV ownership
+// rollup with no conversion, exactly like a TV search.
+export async function fetchTraktShowTmdbIds(kind: "watchlist" | "watched"): Promise<number[]> {
+  const accessToken = await getValidAccessToken();
+  const path = kind === "watched" ? "/sync/watched/shows" : "/sync/watchlist/shows";
+  const response = await fetch(`${TRAKT_BASE}${path}`, { headers: apiHeaders(accessToken) });
+  if (!response.ok) throw new Error(`Trakt ${kind} shows request failed (${response.status}).`);
+  const items = (await response.json()) as Array<{ show?: { ids?: { tmdb?: number | null } } }>;
+  const ids: number[] = [];
+  for (const item of items) {
+    const tmdb = item.show?.ids?.tmdb;
+    if (typeof tmdb === "number" && tmdb > 0) ids.push(tmdb);
+  }
+  return ids;
+}

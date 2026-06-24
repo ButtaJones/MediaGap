@@ -30,6 +30,7 @@ import {
   getDiscoverCollections,
   getMovieDetails,
   getMoviesByTmdbIds,
+  getTvSeasonEpisodes,
   getTvShowDetailWithOwnership,
   resolveTvLibraryTmdbIds,
   searchCompanyMovies,
@@ -398,6 +399,19 @@ api.get("/tv/:tmdbId/detail", async (req, res, next) => {
     const tmdbId = z.coerce.number().int().positive().parse(req.params.tmdbId);
     const detail = await getTvShowDetailWithOwnership(settings.tmdbApiKey, tmdbId);
     res.json(detail);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Lazy per-season episode list with owned/missing status, fetched when a season is expanded.
+api.get("/tv/:tmdbId/season/:seasonNumber/episodes", async (req, res, next) => {
+  try {
+    const settings = requireSettings();
+    const tmdbId = z.coerce.number().int().positive().parse(req.params.tmdbId);
+    const seasonNumber = z.coerce.number().int().min(1).parse(req.params.seasonNumber);
+    const episodes = await getTvSeasonEpisodes(settings.tmdbApiKey, tmdbId, seasonNumber);
+    res.json({ tmdbId, seasonNumber, episodes });
   } catch (error) {
     next(error);
   }

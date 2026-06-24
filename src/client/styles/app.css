@@ -1282,11 +1282,42 @@ textarea:focus {
 
 .tv-season-row {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   border: 1px solid #d7e3ef;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.66);
   padding: 12px 14px;
+}
+
+.tv-season-heading {
+  display: grid;
+  gap: 9px;
+}
+
+/* Accordion header: chevron + the Phase 2 summary (name/badge/count), full-width and clickable. */
+.tv-season-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.tv-season-chevron {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.tv-season-headline {
+  display: grid;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
 }
 
 .tv-season-line {
@@ -1317,6 +1348,88 @@ textarea:focus {
 .tv-season-count {
   color: #5f6f87;
   font-size: 0.86rem;
+  font-weight: 700;
+}
+
+/* Expanded episode list — a vertical stack (reads cleanly on mobile; no wide grid). */
+.tv-episode-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.tv-episode-status {
+  margin: 4px 2px;
+}
+
+.tv-episode-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #dce5f0;
+  border-radius: 6px;
+  background: #f8fbfe;
+  padding: 8px 10px;
+}
+
+/* Missing episodes are the point of this view — highlight them with the established "missing" red
+   (the same accent the missing badge uses, not a new color). */
+.tv-episode-row.missing {
+  border-left: 3px solid #d64550;
+}
+
+.tv-episode-still {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 64px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #e8eef6;
+  color: #8796aa;
+}
+
+.tv-episode-still img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tv-episode-row.missing .tv-episode-still {
+  opacity: 0.55;
+}
+
+.tv-episode-main {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.tv-episode-title {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
+}
+
+.tv-episode-title strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tv-episode-num {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.tv-episode-air {
+  color: #5f6f87;
+  font-size: 0.8rem;
   font-weight: 700;
 }
 
@@ -2364,6 +2477,8 @@ html[data-theme="dark"] .tv-card,
 html[data-theme="plex"] .tv-card,
 html[data-theme="dark"] .tv-season-row,
 html[data-theme="plex"] .tv-season-row,
+html[data-theme="dark"] .tv-episode-row,
+html[data-theme="plex"] .tv-episode-row,
 html[data-theme="dark"] .movie-list-row,
 html[data-theme="plex"] .movie-list-row,
 html[data-theme="dark"] .drawer,
@@ -2449,6 +2564,7 @@ html[data-theme="dark"] .collection-toggle-button small,
 html[data-theme="dark"] .tv-card-year,
 html[data-theme="dark"] .tv-card-status small,
 html[data-theme="dark"] .tv-season-count,
+html[data-theme="dark"] .tv-episode-air,
 html[data-theme="dark"] .tv-season-name small,
 html[data-theme="dark"] .movie-copy p,
 html[data-theme="dark"] .connection-title p,
@@ -2515,6 +2631,7 @@ html[data-theme="dark"] .list-poster,
 html[data-theme="dark"] .suggestion-image,
 html[data-theme="dark"] .details-poster,
 html[data-theme="dark"] .cast-photo,
+html[data-theme="dark"] .tv-episode-still,
 html[data-theme="dark"] .progress-line {
   border-color: #304762;
   background: #122139;
@@ -2571,6 +2688,7 @@ html[data-theme="plex"] .collection-card,
 html[data-theme="plex"] .movie-card,
 html[data-theme="plex"] .tv-card,
 html[data-theme="plex"] .tv-season-row,
+html[data-theme="plex"] .tv-episode-row,
 html[data-theme="plex"] .movie-list-row,
 html[data-theme="plex"] .drawer,
 html[data-theme="plex"] .tracker-drawer,
@@ -2657,6 +2775,7 @@ html[data-theme="plex"] .collection-toggle-button small,
 html[data-theme="plex"] .tv-card-year,
 html[data-theme="plex"] .tv-card-status small,
 html[data-theme="plex"] .tv-season-count,
+html[data-theme="plex"] .tv-episode-air,
 html[data-theme="plex"] .tv-season-name small,
 html[data-theme="plex"] .movie-copy p,
 html[data-theme="plex"] .connection-title p,
@@ -2706,6 +2825,7 @@ html[data-theme="plex"] .list-poster,
 html[data-theme="plex"] .suggestion-image,
 html[data-theme="plex"] .details-poster,
 html[data-theme="plex"] .cast-photo,
+html[data-theme="plex"] .tv-episode-still,
 html[data-theme="plex"] .progress-line {
   border-color: #4a3517;
   background: #17120c;
@@ -2763,6 +2883,7 @@ html[data-theme="emby"] :is(
   .movie-card,
   .tv-card,
   .tv-season-row,
+  .tv-episode-row,
   .movie-list-row,
   .drawer,
   .tracker-drawer,
@@ -2832,6 +2953,7 @@ html[data-theme="emby"] :is(
   .tv-card-year,
   .tv-card-status small,
   .tv-season-count,
+  .tv-episode-air,
   .tv-season-name small,
   .movie-copy p,
   .connection-title p,
@@ -2873,7 +2995,7 @@ html[data-theme="emby"] .refresh-progress p {
   color: #b6d1c1;
 }
 
-html[data-theme="emby"] :is(.empty-state, .poster-frame, .list-poster, .suggestion-image, .details-poster, .cast-photo, .progress-line) {
+html[data-theme="emby"] :is(.empty-state, .poster-frame, .list-poster, .suggestion-image, .details-poster, .cast-photo, .tv-episode-still, .progress-line) {
   border-color: #315a47;
   background: #12291f;
   color: #a8c8b8;
@@ -2931,6 +3053,7 @@ html[data-theme="jellyfin"] :is(
   .movie-card,
   .tv-card,
   .tv-season-row,
+  .tv-episode-row,
   .movie-list-row,
   .drawer,
   .tracker-drawer,
@@ -3000,6 +3123,7 @@ html[data-theme="jellyfin"] :is(
   .tv-card-year,
   .tv-card-status small,
   .tv-season-count,
+  .tv-episode-air,
   .tv-season-name small,
   .movie-copy p,
   .connection-title p,
@@ -3041,7 +3165,7 @@ html[data-theme="jellyfin"] .refresh-progress p {
   color: #c1c7e5;
 }
 
-html[data-theme="jellyfin"] :is(.empty-state, .poster-frame, .list-poster, .suggestion-image, .details-poster, .cast-photo, .progress-line) {
+html[data-theme="jellyfin"] :is(.empty-state, .poster-frame, .list-poster, .suggestion-image, .details-poster, .cast-photo, .tv-episode-still, .progress-line) {
   border-color: #454d85;
   background: #151a39;
   color: #aeb6da;

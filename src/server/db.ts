@@ -482,6 +482,22 @@ export function getOwnedSeasonsForShow(tmdbId: number): Array<{ seasonNumber: nu
     .all(tmdbId, serverType) as Array<{ seasonNumber: number; ownedEpisodeCount: number }>;
 }
 
+// The owned episode NUMBERS for a show's season (active server), deduped across rating keys in case
+// the show spans multiple libraries. Used to mark each TMDb episode owned vs missing in Phase 3.
+export function getOwnedEpisodeNumbers(tmdbId: number, seasonNumber: number): number[] {
+  const serverType = activeMediaServerType();
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT e.episode_number AS episodeNumber
+       FROM tv_episodes e
+       JOIN tv_shows sh ON sh.rating_key = e.show_rating_key AND sh.media_server_type = e.media_server_type
+       WHERE sh.tmdb_id = ? AND sh.media_server_type = ? AND e.season_number = ?
+       ORDER BY e.episode_number`
+    )
+    .all(tmdbId, serverType, seasonNumber) as Array<{ episodeNumber: number }>;
+  return rows.map((row) => row.episodeNumber);
+}
+
 export function getTvLibraryStats() {
   const serverType = activeMediaServerType();
   const shows = db.prepare("SELECT COUNT(*) AS count FROM tv_shows WHERE media_server_type = ?").get(serverType) as { count: number };

@@ -238,10 +238,26 @@ export interface TvSeasonSummary {
   seasonNumber: number;
   /** TMDb aired-episode count for the season (future-dated episodes excluded). */
   episodeCount: number;
-  /** Episodes the user owns in this season (from getOwnedSeasonsForShow). */
+  /** Aired episodes the user owns in this season — same source as the expanded episode list. */
   ownedEpisodeCount: number;
   airYear: number | null;
   status: TvOwnershipStatus;
+}
+
+// Phase 3: one aired episode with its owned/missing state (future-dated episodes are excluded, so an
+// unaired episode is never shown as "missing"). Lazy-loaded per season when a season is expanded.
+export interface TvEpisodeSummary {
+  episodeNumber: number;
+  name: string | null;
+  airDate: string | null;
+  stillPath: string | null;
+  status: "owned" | "missing";
+}
+
+export interface TvSeasonEpisodesResponse {
+  tmdbId: number;
+  seasonNumber: number;
+  episodes: TvEpisodeSummary[];
 }
 
 export interface TvShowResult {

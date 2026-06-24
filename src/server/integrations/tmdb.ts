@@ -1,6 +1,7 @@
 import {
   cacheGet,
   cacheSet,
+  getOwnedEpisodeNumbers,
   getOwnedSeasonsForShow,
   getOwnedTvShowTmdbIds,
   listCachedCollections,
@@ -28,6 +29,7 @@ import type {
   MovieResult,
   PersonHeader,
   SearchSuggestion,
+  TvEpisodeSummary,
   TvOwnershipStatus,
   TvSeasonSummary,
   TvShowDetail,
@@ -39,6 +41,7 @@ const TMDB_BASE = "https://api.themoviedb.org/3";
 const IMAGE_BASE = "https://image.tmdb.org/t/p/w342";
 const BACKDROP_BASE = "https://image.tmdb.org/t/p/w780";
 const LOGO_BASE = "https://image.tmdb.org/t/p/original";
+const STILL_BASE = "https://image.tmdb.org/t/p/w227_and_h127_bestv2";
 const IMDB_RATINGS_URL = "https://datasets.imdbws.com/title.ratings.tsv.gz";
 let imdbRatingsPromise: Promise<Map<string, { rating: number; votes: number }>> | null = null;
 let collectionRefreshStatus: CollectionsRefreshStatus = {
@@ -105,6 +108,7 @@ interface TmdbTvEpisode {
   season_number?: number;
   air_date?: string | null;
   name?: string;
+  still_path?: string | null;
 }
 
 interface TmdbTvSeasonDetails {
@@ -571,8 +575,44 @@ export async function searchTvSuggestions(apiKey: string, query: string): Promis
   }));
 }
 
-// Precise show-detail ownership: fetch each eligible season's episode list to count AIRED episodes
-// (entirely-unaired seasons are dropped, not shown as missing) and compare against owned counts.
+// Single source of truth for a season's aired episodes + owned/missing state: it drives BOTH the
+// per-season counts in the show-detail summary AND the expanded episode list, so they always agree
+// (Phase 3 §3). Future-dated episodes are excluded so an unaired episode is never "missing". The
+// TMDb season fetch is cached, so re-reading on expand is cheap.
+async function getSeasonEpisodeOwnership(
+  apiKey: string,
+  tmdbId: number,
+  seasonNumber: number,
+  today: string
+): Promise<{ episodes: TvEpisodeSummary[]; airedCount: number; ownedCount: number }> {
+  const detail = await getTvSeasonDetails(apiKey, tmdbId, seasonNumber);
+  const ownedNumbers = new Set(getOwnedEpisodeNumbers(tmdbId, seasonNumber));
+  const episodes: TvEpisodeSummary[] = [];
+  for (const episode of detail.episodes ?? []) {
+    if (typeof episode.episode_number !== "number") continue;
+    if (!isAired(episode.air_date, today)) continue;
+    episodes.push({
+      episodeNumber: episode.episode_number,
+      name: episode.name || null,
+      airDate: episode.air_date ?? null,
+      stillPath: episode.still_path ? `${STILL_BASE}${episode.still_path}` : null,
+      status: ownedNumbers.has(episode.episode_number) ? "owned" : "missing"
+    });
+  }
+  episodes.sort((a, b) => a.episodeNumber - b.episodeNumber);
+  const ownedCount = episodes.reduce((count, episode) => count + (episode.status === "owned" ? 1 : 0), 0);
+  return { episodes, airedCount: episodes.length, ownedCount };
+}
+
+// Lazy per-season episode list (owned/missing), fetched when the user expands a season.
+export async function getTvSeasonEpisodes(apiKey: string, tmdbId: number, seasonNumber: number): Promise<TvEpisodeSummary[]> {
+  const { episodes } = await getSeasonEpisodeOwnership(apiKey, tmdbId, seasonNumber, todayIso());
+  return episodes;
+}
+
+// Precise show-detail ownership: per eligible season, count AIRED episodes and how many are owned
+// (entirely-unaired seasons are dropped, not shown as missing). Counts come from the same
+// episode-ownership computation the expanded list uses, so summary and list never disagree.
 export async function getTvShowDetailWithOwnership(apiKey: string, tmdbId: number): Promise<TvShowDetail> {
   const details = await getTvShowDetails(apiKey, tmdbId);
   const today = todayIso();
@@ -587,22 +627,20 @@ export async function getTvShowDetailWithOwnership(apiKey: string, tmdbId: numbe
     const settled = await Promise.allSettled(
       batch.map(async (season) => {
         const seasonNumber = season.season_number as number;
-        const detail = await getTvSeasonDetails(apiKey, tmdbId, seasonNumber);
-        const airedEpisodes = (detail.episodes ?? []).filter((episode) => isAired(episode.air_date, today)).length;
-        return { season, seasonNumber, airedEpisodes };
+        const { airedCount, ownedCount } = await getSeasonEpisodeOwnership(apiKey, tmdbId, seasonNumber, today);
+        return { season, seasonNumber, airedCount, ownedCount };
       })
     );
     for (const outcome of settled) {
       if (outcome.status !== "fulfilled") continue;
-      const { season, seasonNumber, airedEpisodes } = outcome.value;
-      if (airedEpisodes <= 0) continue; // entirely unaired season → not "missing", just unreleased
-      const ownedEpisodeCount = owned.get(seasonNumber) ?? 0;
+      const { season, seasonNumber, airedCount, ownedCount } = outcome.value;
+      if (airedCount <= 0) continue; // entirely unaired season → not "missing", just unreleased
       seasons.push({
         seasonNumber,
-        episodeCount: airedEpisodes,
-        ownedEpisodeCount: Math.min(ownedEpisodeCount, airedEpisodes),
+        episodeCount: airedCount,
+        ownedEpisodeCount: ownedCount,
         airYear: yearFromDate(season.air_date ?? null),
-        status: ownedEpisodeCount <= 0 ? "missing" : ownedEpisodeCount >= airedEpisodes ? "complete" : "partial"
+        status: ownedCount <= 0 ? "missing" : ownedCount >= airedCount ? "complete" : "partial"
       });
     }
   }

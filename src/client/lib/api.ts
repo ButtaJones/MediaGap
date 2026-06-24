@@ -21,6 +21,7 @@ import type {
   TraktStatus,
   TvScanResponse,
   TvSearchResponse,
+  TvSeasonEpisodesResponse,
   TvShowDetail,
   TvSuggestResponse
 } from "../../shared/types";
@@ -83,6 +84,8 @@ export const api = {
   searchTv: (query: string) => request<TvSearchResponse>(`/tv/search?q=${encodeURIComponent(query)}`),
   tvSuggest: (query: string) => request<TvSuggestResponse>(`/tv/suggest?q=${encodeURIComponent(query)}`),
   tvShowDetail: (tmdbId: number) => request<TvShowDetail>(`/tv/${tmdbId}/detail`),
+  tvSeasonEpisodes: (tmdbId: number, seasonNumber: number) =>
+    request<TvSeasonEpisodesResponse>(`/tv/${tmdbId}/season/${seasonNumber}/episodes`),
   tvLibraries: () => request<{ libraries: MediaServerLibrary[] }>("/media-server/tv/libraries"),
   scanTv: (libraryIds: string[]) =>
     request<TvScanResponse>("/media-server/scan/tv", {

@@ -112,10 +112,46 @@ export interface MediaServerMovie {
 
 export type PlexMovie = MediaServerMovie;
 
+// --- TV (Phase 1: backend foundation, owned-side records only) ---
+// Normalized owned-side TV records, mirroring MediaServerMovie. Each server adapter maps its
+// native TV payload into these shapes so downstream logic stays source-agnostic. v1 covers
+// standard sequentially-seasoned television only (no season 0, no absolute/air-date numbering).
+
+export interface MediaServerShow {
+  mediaServerType: MediaServerType;
+  /** The server's native show id (Plex ratingKey / Jellyfin-Emby item Id). */
+  ratingKey: string;
+  title: string;
+  normalizedTitle: string;
+  year: number | null;
+  /** May be null at adapter time; resolved later via the TVDB/IMDb/title chain. */
+  tmdbId: number | null;
+  imdbId: string | null;
+  tvdbId: number | null;
+  posterPath: string | null;
+}
+
+export interface MediaServerSeason {
+  showRatingKey: string;
+  mediaServerType: MediaServerType;
+  seasonNumber: number;
+  /** Count of owned episodes in this season (the empirical truth from the library). */
+  ownedEpisodeCount: number;
+}
+
+export interface MediaServerEpisode {
+  showRatingKey: string;
+  mediaServerType: MediaServerType;
+  seasonNumber: number;
+  episodeNumber: number;
+  /** The episode's own native id on the server. */
+  ratingKey: string;
+}
+
 export interface MediaServerLibrary {
   key: string;
   title: string;
-  type: "movie";
+  type: "movie" | "show";
 }
 
 export type PlexLibrary = MediaServerLibrary;

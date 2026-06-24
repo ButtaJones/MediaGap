@@ -21,6 +21,7 @@ import type {
   CollectionsRefreshResponse,
   CollectionsRefreshStatus,
   CollectionsResponse,
+  MediaServerShow,
   MovieDetails,
   MovieResult,
   PersonHeader,
@@ -62,6 +63,42 @@ interface TmdbMovie {
 
 interface TmdbFindResponse {
   movie_results?: TmdbMovie[];
+  tv_results?: TmdbMovie[];
+}
+
+// --- TMDb TV-side types (the "truth" layer later phases diff against owned data) ---
+interface TmdbTvSeasonSummary {
+  season_number?: number;
+  episode_count?: number;
+  air_date?: string | null;
+  name?: string;
+  poster_path?: string | null;
+}
+
+interface TmdbTvDetails {
+  id: number;
+  name?: string;
+  first_air_date?: string | null;
+  poster_path?: string | null;
+  number_of_seasons?: number;
+  seasons?: TmdbTvSeasonSummary[];
+  external_ids?: {
+    imdb_id?: string | null;
+    tvdb_id?: number | null;
+  };
+}
+
+interface TmdbTvEpisode {
+  episode_number?: number;
+  season_number?: number;
+  air_date?: string | null;
+  name?: string;
+}
+
+interface TmdbTvSeasonDetails {
+  season_number?: number;
+  air_date?: string | null;
+  episodes?: TmdbTvEpisode[];
 }
 
 interface TmdbMovieDetails extends TmdbMovie {
@@ -300,6 +337,131 @@ export async function resolveTmdbIdFromImdb(apiKey: string, imdbId: string): Pro
   const tmdbId = response.movie_results?.[0]?.id ?? null;
   cacheSet(key, { tmdbId });
   return tmdbId;
+}
+
+// --- TV id resolution + endpoints (Phase 1) ---
+// Resolve a scanned show's TMDb id by the chain: server-provided TMDb id → TVDB id via /find →
+// IMDb id via /find → title+year search (last resort). Every lookup is cached in SQLite so a
+// re-scan never re-hits TMDb. TMDb's /find resolves TVDB ids directly, so no TVDB API call is made.
+
+export type TvIdMethod = "server" | "tvdb" | "imdb" | "title-year" | "unresolved";
+
+export async function resolveTvTmdbIdFromTvdb(apiKey: string, tvdbId: number): Promise<number | null> {
+  if (!Number.isFinite(tvdbId) || tvdbId <= 0) return null;
+  const key = `tmdb:find:tvdb:${tvdbId}`;
+  const cached = cacheGet<{ tmdbId: number | null }>(key);
+  if (cached) return cached.tmdbId;
+
+  const response = await tmdbFetch<TmdbFindResponse>(apiKey, `/find/${tvdbId}`, { external_source: "tvdb_id" });
+  const tmdbId = response.tv_results?.[0]?.id ?? null;
+  cacheSet(key, { tmdbId });
+  return tmdbId;
+}
+
+export async function resolveTvTmdbIdFromImdb(apiKey: string, imdbId: string): Promise<number | null> {
+  const normalized = imdbId.trim();
+  if (!normalized) return null;
+  const key = `tmdb:find:imdb:tv:${normalized}`;
+  const cached = cacheGet<{ tmdbId: number | null }>(key);
+  if (cached) return cached.tmdbId;
+
+  const response = await tmdbFetch<TmdbFindResponse>(apiKey, `/find/${encodeURIComponent(normalized)}`, {
+    external_source: "imdb_id"
+  });
+  const tmdbId = response.tv_results?.[0]?.id ?? null;
+  cacheSet(key, { tmdbId });
+  return tmdbId;
+}
+
+export async function searchTvShowId(apiKey: string, title: string, year: number | null): Promise<number | null> {
+  const trimmed = title.trim();
+  if (!trimmed) return null;
+  const key = `tmdb:search:tv:${trimmed.toLowerCase()}:${year ?? ""}`;
+  const cached = cacheGet<{ tmdbId: number | null }>(key);
+  if (cached) return cached.tmdbId;
+
+  const params: Record<string, string> = { query: trimmed, include_adult: "false" };
+  if (year) params.first_air_date_year = String(year);
+  const response = await tmdbFetch<{ results?: TmdbMovie[] }>(apiKey, "/search/tv", params);
+  const tmdbId = response.results?.[0]?.id ?? null;
+  cacheSet(key, { tmdbId });
+  return tmdbId;
+}
+
+async function resolveTvShowTmdbId(
+  apiKey: string,
+  show: Pick<MediaServerShow, "tmdbId" | "tvdbId" | "imdbId" | "title" | "year">
+): Promise<{ tmdbId: number | null; method: TvIdMethod }> {
+  if (show.tmdbId) return { tmdbId: show.tmdbId, method: "server" };
+  if (show.tvdbId) {
+    const fromTvdb = await resolveTvTmdbIdFromTvdb(apiKey, show.tvdbId);
+    if (fromTvdb) return { tmdbId: fromTvdb, method: "tvdb" };
+  }
+  if (show.imdbId) {
+    const fromImdb = await resolveTvTmdbIdFromImdb(apiKey, show.imdbId);
+    if (fromImdb) return { tmdbId: fromImdb, method: "imdb" };
+  }
+  const fromTitle = await searchTvShowId(apiKey, show.title, show.year);
+  if (fromTitle) return { tmdbId: fromTitle, method: "title-year" };
+  return { tmdbId: null, method: "unresolved" };
+}
+
+export interface TvLibraryResolution {
+  shows: MediaServerShow[];
+  methodCounts: Record<TvIdMethod, number>;
+  unresolved: Array<{ title: string; year: number | null }>;
+}
+
+// Resolve TMDb ids for a whole scanned library, in small concurrent batches (like the collections
+// refresh). Shows are returned with tmdbId filled where possible; ones that never resolve are kept
+// (the owned library stays complete) but reported as unresolved and excluded from id-keyed helpers.
+export async function resolveTvLibraryTmdbIds(apiKey: string, shows: MediaServerShow[]): Promise<TvLibraryResolution> {
+  const methodCounts: Record<TvIdMethod, number> = { server: 0, tvdb: 0, imdb: 0, "title-year": 0, unresolved: 0 };
+  const unresolved: Array<{ title: string; year: number | null }> = [];
+  const resolved: MediaServerShow[] = [];
+
+  for (const batch of chunks(shows, 8)) {
+    const results = await Promise.all(
+      batch.map(async (show) => {
+        try {
+          const { tmdbId, method } = await resolveTvShowTmdbId(apiKey, show);
+          return { show: { ...show, tmdbId: tmdbId ?? show.tmdbId }, method, failed: !tmdbId && !show.tmdbId };
+        } catch {
+          // A failed lookup must not break the scan — keep the show with whatever id it already had.
+          return { show, method: "unresolved" as TvIdMethod, failed: !show.tmdbId };
+        }
+      })
+    );
+    for (const result of results) {
+      methodCounts[result.method] += 1;
+      if (result.failed) unresolved.push({ title: result.show.title, year: result.show.year });
+      resolved.push(result.show);
+    }
+  }
+
+  return { shows: resolved, methodCounts, unresolved };
+}
+
+// TMDb TV endpoints for later phases (the missing-episode "truth" side). Cached in SQLite so they
+// resolve during scan/refresh, never per render.
+export async function getTvShowDetails(apiKey: string, tmdbId: number): Promise<TmdbTvDetails> {
+  const key = `tmdb:tv-details:${tmdbId}`;
+  const cached = cacheGet<TmdbTvDetails>(key);
+  if (cached) return cached;
+
+  const raw = await tmdbFetch<TmdbTvDetails>(apiKey, `/tv/${tmdbId}`, { append_to_response: "external_ids" });
+  cacheSet(key, raw);
+  return raw;
+}
+
+export async function getTvSeasonDetails(apiKey: string, tmdbId: number, seasonNumber: number): Promise<TmdbTvSeasonDetails> {
+  const key = `tmdb:tv-season:${tmdbId}:${seasonNumber}`;
+  const cached = cacheGet<TmdbTvSeasonDetails>(key);
+  if (cached) return cached;
+
+  const raw = await tmdbFetch<TmdbTvSeasonDetails>(apiKey, `/tv/${tmdbId}/season/${seasonNumber}`);
+  cacheSet(key, raw);
+  return raw;
 }
 
 export async function searchSuggestions(

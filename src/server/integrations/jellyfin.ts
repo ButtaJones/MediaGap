@@ -1,7 +1,15 @@
 import { normalizeTitle, yearFromDate } from "../services/normalize.js";
+import { normalizeShowEpisodes, type RawEpisode } from "../services/tvFilter.js";
 import { resolveTmdbIdFromImdb } from "./tmdb.js";
-import type { MediaServer, MediaServerConnectionResult } from "./mediaServer.js";
-import type { MediaServerLibrary, MediaServerMovie, MediaServerType } from "../../shared/types.js";
+import type { MediaServer, MediaServerConnectionResult, MediaServerTvScanResult, MediaServerTvSkip } from "./mediaServer.js";
+import type {
+  MediaServerEpisode,
+  MediaServerLibrary,
+  MediaServerMovie,
+  MediaServerSeason,
+  MediaServerShow,
+  MediaServerType
+} from "../../shared/types.js";
 
 const PAGE_SIZE = 500;
 
@@ -54,6 +62,29 @@ interface JellyfinMediaStream {
   Type?: string;
   Width?: number;
   Height?: number;
+}
+
+interface JellyfinSeries {
+  Id?: string;
+  Name?: string;
+  ProductionYear?: number;
+  PremiereDate?: string;
+  ProviderIds?: Record<string, string | undefined>;
+  ImageTags?: Record<string, string | undefined>;
+}
+
+interface JellyfinEpisode {
+  Id?: string;
+  /** Season number. */
+  ParentIndexNumber?: number;
+  /** Episode number within the season. */
+  IndexNumber?: number;
+  PremiereDate?: string;
+}
+
+interface JellyfinItemsPage<T> {
+  Items?: T[];
+  TotalRecordCount?: number;
 }
 
 interface EmbyFamilyOptions {
@@ -123,6 +154,121 @@ export class EmbyFamilyServer implements MediaServer {
     };
   }
 
+  async getTvLibraries(): Promise<MediaServerLibrary[]> {
+    const user = await this.resolveUser();
+    const response = await this.fetchJson<JellyfinViewsResponse>(`/Users/${encodeURIComponent(user.Id ?? this.userId)}/Views`);
+    return (response.Items ?? [])
+      .filter((view) => view.Id && view.Name && view.CollectionType === "tvshows")
+      .map((view) => ({
+        key: String(view.Id),
+        title: String(view.Name),
+        type: "show" as const
+      }));
+  }
+
+  async scanTv(libraryIds: string[] = []): Promise<MediaServerTvScanResult> {
+    const availableLibraries = await this.getTvLibraries();
+    const selected = new Set(libraryIds);
+    const libraries = selected.size
+      ? availableLibraries.filter((library) => selected.has(library.key))
+      : availableLibraries;
+
+    const shows: MediaServerShow[] = [];
+    const seasons: MediaServerSeason[] = [];
+    const episodes: MediaServerEpisode[] = [];
+    const skipped: MediaServerTvSkip[] = [];
+    let futureEpisodesExcluded = 0;
+
+    for (const library of libraries) {
+      const series = await this.fetchItems<JellyfinSeries>(
+        library.key,
+        "Series",
+        "ProviderIds,ProductionYear,PremiereDate,ImageTags"
+      );
+      for (const show of series) {
+        if (!show.Id || !show.Name) continue;
+        const ratingKey = `${this.type}:${show.Id}`;
+        const rawEpisodes = await this.fetchShowEpisodes(show.Id);
+        const normalized = normalizeShowEpisodes(ratingKey, this.type, rawEpisodes);
+        futureEpisodesExcluded += normalized.futureExcluded;
+
+        if (!normalized.episodes.length) {
+          skipped.push({
+            title: show.Name,
+            reason: normalized.badNumbering > 0 ? "unsupported-numbering" : "no-episodes"
+          });
+          continue;
+        }
+
+        const releaseDate = normalizeDate(show.PremiereDate);
+        shows.push({
+          mediaServerType: this.type,
+          ratingKey,
+          title: show.Name,
+          normalizedTitle: normalizeTitle(show.Name),
+          year: show.ProductionYear ?? yearFromDate(releaseDate),
+          tmdbId: normalizeTmdbId(show.ProviderIds),
+          imdbId: normalizeImdbId(show.ProviderIds),
+          tvdbId: normalizeTvdbId(show.ProviderIds),
+          posterPath: this.posterUrl(show)
+        });
+        seasons.push(...normalized.seasons);
+        episodes.push(...normalized.episodes);
+      }
+    }
+
+    return {
+      shows,
+      seasons,
+      episodes,
+      sections: libraries.map((library) => library.title),
+      skipped,
+      futureEpisodesExcluded
+    };
+  }
+
+  private async fetchShowEpisodes(seriesId: string): Promise<RawEpisode[]> {
+    const items = await this.fetchItems<JellyfinEpisode>(seriesId, "Episode", "ProviderIds,PremiereDate,ParentIndexNumber,IndexNumber");
+    return items
+      .filter((item) => item.Id)
+      .map((item) => ({
+        ratingKey: `${this.type}:${item.Id}`,
+        seasonNumber: typeof item.ParentIndexNumber === "number" ? item.ParentIndexNumber : null,
+        episodeNumber: typeof item.IndexNumber === "number" ? item.IndexNumber : null,
+        airDate: normalizeDate(item.PremiereDate)
+      }));
+  }
+
+  // Paginated /Items fetch shared by the TV show and episode scans, mirroring fetchLibraryMovies
+  // (kept separate so the movie scan stays byte-for-byte unchanged).
+  private async fetchItems<T>(parentId: string, includeItemTypes: string, fields: string): Promise<T[]> {
+    const results: T[] = [];
+    let startIndex = 0;
+    let total = Number.POSITIVE_INFINITY;
+    const user = await this.resolveUser();
+
+    while (startIndex < total) {
+      const params = new URLSearchParams({
+        ParentId: parentId,
+        Recursive: "true",
+        IncludeItemTypes: includeItemTypes,
+        Fields: fields,
+        StartIndex: String(startIndex),
+        Limit: String(PAGE_SIZE)
+      });
+      const response = await this.fetchJson<JellyfinItemsPage<T>>(
+        `/Users/${encodeURIComponent(user.Id ?? this.userId)}/Items?${params.toString()}`
+      );
+      const items = response.Items ?? [];
+      results.push(...items);
+      total = response.TotalRecordCount ?? results.length;
+      if (!items.length) break;
+      startIndex += items.length;
+    }
+
+    return results;
+  }
+
   private async fetchLibraryMovies(parentId: string): Promise<JellyfinMovie[]> {
     const movies: JellyfinMovie[] = [];
     let startIndex = 0;
@@ -180,7 +326,7 @@ export class EmbyFamilyServer implements MediaServer {
     }
   }
 
-  private posterUrl(movie: JellyfinMovie): string | null {
+  private posterUrl(movie: { Id?: string; ImageTags?: Record<string, string | undefined> }): string | null {
     if (!movie.Id || !movie.ImageTags?.Primary) return null;
     const url = this.urls(`/Items/${encodeURIComponent(movie.Id)}/Images/Primary`)[0];
     url.searchParams.set("tag", movie.ImageTags.Primary);
@@ -299,6 +445,12 @@ function normalizeImdbId(providerIds: Record<string, string | undefined> | undef
   const raw = normalizeProviderId(providerIds, "Imdb");
   const match = raw?.match(/tt\d+/i);
   return match ? match[0] : null;
+}
+
+function normalizeTvdbId(providerIds: Record<string, string | undefined> | undefined): number | null {
+  const raw = normalizeProviderId(providerIds, "Tvdb");
+  const parsed = raw ? Number(raw) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function normalizeDate(value: string | undefined): string | null {

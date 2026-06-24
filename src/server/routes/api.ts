@@ -8,8 +8,10 @@ import {
   deleteHistoryEntry,
   getLibraryStats,
   getSettings,
+  getTvLibraryStats,
   listHistoryEntries,
   replaceMediaServerMovies,
+  replaceMediaServerTv,
   saveSettings,
   updateHistoryEntry,
 } from "../db.js";
@@ -28,6 +30,7 @@ import {
   getDiscoverCollections,
   getMovieDetails,
   getMoviesByTmdbIds,
+  resolveTvLibraryTmdbIds,
   searchCompanyMovies,
   searchMovies,
   searchPersonCredits,
@@ -278,6 +281,87 @@ async function handleScan(req: Request, res: Response, next: NextFunction) {
 
 api.post("/media-server/scan", handleScan);
 api.post("/plex/scan", handleScan);
+
+async function handleTvLibraries(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const settings = getSettings();
+    const server = createMediaServer(settings);
+    const libraries = await server.getTvLibraries();
+    appendLog(settings.logPath, settings.loggingEnabled, "info", `Loaded ${server.displayName} TV libraries`, { count: libraries.length });
+    res.json({ libraries });
+  } catch (error) {
+    const settings = getSettings();
+    appendLog(settings.logPath, settings.loggingEnabled, "error", `Failed to load ${mediaServerLabel(settings.mediaServerType)} TV libraries`, {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    next(error);
+  }
+}
+
+api.get("/media-server/tv/libraries", handleTvLibraries);
+
+// TV library scan (Phase 1: no UI yet). Reads the server's TV library, resolves each show's TMDb id
+// (server → TVDB → IMDb → title), and replaces this server type's tv_shows/seasons/episodes in one
+// transaction. Reports stored counts plus skip/exclusion tallies. Mirrors handleScan for movies.
+async function handleTvScan(req: Request, res: Response, next: NextFunction) {
+  try {
+    const settings = requireSettings();
+    const server = createMediaServer(settings);
+    const body = z.object({ libraryIds: z.array(z.string()).default([]) }).parse(req.body ?? {});
+    const scan = await server.scanTv(body.libraryIds);
+    const resolution = await resolveTvLibraryTmdbIds(settings.tmdbApiKey, scan.shows);
+    const stored = replaceMediaServerTv(server.type, resolution.shows, scan.seasons, scan.episodes);
+    await refreshStoredServerId(server);
+
+    const unsupportedNumbering = scan.skipped.filter((skip) => skip.reason === "unsupported-numbering");
+    const noEpisodes = scan.skipped.filter((skip) => skip.reason === "no-episodes");
+    const summary = {
+      shows: stored.shows,
+      seasons: stored.seasons,
+      episodes: stored.episodes,
+      sections: scan.sections,
+      futureEpisodesExcluded: scan.futureEpisodesExcluded,
+      idResolution: resolution.methodCounts,
+      skipped: {
+        total: scan.skipped.length,
+        unsupportedNumbering: unsupportedNumbering.map((skip) => skip.title),
+        noEpisodes: noEpisodes.map((skip) => skip.title)
+      },
+      unresolvedIds: resolution.unresolved,
+      scannedAt: new Date().toISOString()
+    };
+
+    appendLog(settings.logPath, settings.loggingEnabled, "info", `${server.displayName} TV scan completed`, {
+      shows: stored.shows,
+      seasons: stored.seasons,
+      episodes: stored.episodes,
+      sections: scan.sections,
+      futureEpisodesExcluded: scan.futureEpisodesExcluded,
+      skippedUnsupportedNumbering: unsupportedNumbering.length,
+      skippedNoEpisodes: noEpisodes.length,
+      unresolvedIds: resolution.unresolved.length,
+      idResolution: resolution.methodCounts
+    });
+    res.json(summary);
+  } catch (error) {
+    const settings = getSettings();
+    appendLog(settings.logPath, settings.loggingEnabled, "error", `${mediaServerLabel(settings.mediaServerType)} TV scan failed`, {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    next(error);
+  }
+}
+
+api.post("/media-server/scan/tv", handleTvScan);
+api.post("/scan/tv", handleTvScan);
+
+api.get("/tv/stats", (_req, res, next) => {
+  try {
+    res.json(getTvLibraryStats());
+  } catch (error) {
+    next(error);
+  }
+});
 
 api.get("/search", async (req, res, next) => {
   try {

@@ -5,7 +5,17 @@ import { config } from "./config.js";
 import { DEFAULT_LOG_PATH } from "./services/logger.js";
 import { normalizeTitle } from "./services/normalize.js";
 import { MEDIA_SERVER_TYPES } from "../shared/types.js";
-import type { AppSettings, DownloadHistoryEntry, DownloaderType, MediaServerMovie, MediaServerType, MovieResult } from "../shared/types.js";
+import type {
+  AppSettings,
+  DownloadHistoryEntry,
+  DownloaderType,
+  MediaServerEpisode,
+  MediaServerMovie,
+  MediaServerSeason,
+  MediaServerShow,
+  MediaServerType,
+  MovieResult
+} from "../shared/types.js";
 
 export interface CachedCollectionMovie {
   id: number;
@@ -125,6 +135,45 @@ db.exec(`
     movies_json TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS tv_shows (
+    rating_key TEXT PRIMARY KEY,
+    media_server_type TEXT NOT NULL DEFAULT 'plex',
+    title TEXT,
+    normalized_title TEXT,
+    year INTEGER,
+    tmdb_id INTEGER,
+    imdb_id TEXT,
+    tvdb_id INTEGER,
+    poster_path TEXT,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tv_shows_tmdb_id ON tv_shows(media_server_type, tmdb_id);
+  CREATE INDEX IF NOT EXISTS idx_tv_shows_title_year ON tv_shows(media_server_type, normalized_title, year);
+
+  CREATE TABLE IF NOT EXISTS tv_seasons (
+    show_rating_key TEXT,
+    media_server_type TEXT,
+    season_number INTEGER,
+    owned_episode_count INTEGER,
+    updated_at TEXT,
+    PRIMARY KEY (show_rating_key, season_number)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tv_seasons_show ON tv_seasons(show_rating_key);
+
+  CREATE TABLE IF NOT EXISTS tv_episodes (
+    show_rating_key TEXT,
+    media_server_type TEXT,
+    season_number INTEGER,
+    episode_number INTEGER,
+    rating_key TEXT,
+    updated_at TEXT,
+    PRIMARY KEY (show_rating_key, season_number, episode_number)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tv_episodes_show_season ON tv_episodes(show_rating_key, season_number);
 `);
 
 ensureColumn("plex_movies", "media_server_type", "TEXT NOT NULL DEFAULT 'plex'");
@@ -318,6 +367,135 @@ export function replaceMediaServerMovies(serverType: MediaServerType, movies: Me
     throw error;
   }
   return upsertPlexMovies(movies.map((movie) => ({ ...movie, mediaServerType: serverType })));
+}
+
+// Replace ALL of a server type's TV data (shows + seasons + episodes) in ONE transaction, mirroring
+// replaceMediaServerMovies. Because node:sqlite handling is manual, deleting every row for the
+// server type and re-inserting the current scan cascades removals (a deleted show's seasons/episodes
+// are wiped too) and guarantees no duplicates or orphan rows. Reused prepared statements keep the
+// bulk insert off the critical path — important since episode counts dwarf movie counts.
+export function replaceMediaServerTv(
+  serverType: MediaServerType,
+  shows: MediaServerShow[],
+  seasons: MediaServerSeason[],
+  episodes: MediaServerEpisode[]
+): { shows: number; seasons: number; episodes: number } {
+  const now = new Date().toISOString();
+
+  const showStmt = db.prepare(`
+    INSERT INTO tv_shows (
+      rating_key, media_server_type, title, normalized_title, year, tmdb_id, imdb_id, tvdb_id, poster_path, updated_at
+    ) VALUES (
+      @ratingKey, @mediaServerType, @title, @normalizedTitle, @year, @tmdbId, @imdbId, @tvdbId, @posterPath, @updatedAt
+    )
+    ON CONFLICT(rating_key) DO UPDATE SET
+      media_server_type = excluded.media_server_type,
+      title = excluded.title,
+      normalized_title = excluded.normalized_title,
+      year = excluded.year,
+      tmdb_id = excluded.tmdb_id,
+      imdb_id = excluded.imdb_id,
+      tvdb_id = excluded.tvdb_id,
+      poster_path = excluded.poster_path,
+      updated_at = excluded.updated_at
+  `);
+
+  const seasonStmt = db.prepare(`
+    INSERT INTO tv_seasons (
+      show_rating_key, media_server_type, season_number, owned_episode_count, updated_at
+    ) VALUES (
+      @showRatingKey, @mediaServerType, @seasonNumber, @ownedEpisodeCount, @updatedAt
+    )
+    ON CONFLICT(show_rating_key, season_number) DO UPDATE SET
+      media_server_type = excluded.media_server_type,
+      owned_episode_count = excluded.owned_episode_count,
+      updated_at = excluded.updated_at
+  `);
+
+  const episodeStmt = db.prepare(`
+    INSERT INTO tv_episodes (
+      show_rating_key, media_server_type, season_number, episode_number, rating_key, updated_at
+    ) VALUES (
+      @showRatingKey, @mediaServerType, @seasonNumber, @episodeNumber, @ratingKey, @updatedAt
+    )
+    ON CONFLICT(show_rating_key, season_number, episode_number) DO UPDATE SET
+      media_server_type = excluded.media_server_type,
+      rating_key = excluded.rating_key,
+      updated_at = excluded.updated_at
+  `);
+
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM tv_episodes WHERE media_server_type = ?").run(serverType);
+    db.prepare("DELETE FROM tv_seasons WHERE media_server_type = ?").run(serverType);
+    db.prepare("DELETE FROM tv_shows WHERE media_server_type = ?").run(serverType);
+
+    for (const show of shows) {
+      showStmt.run({
+        ...show,
+        mediaServerType: serverType,
+        tmdbId: show.tmdbId ?? null,
+        imdbId: show.imdbId ?? null,
+        tvdbId: show.tvdbId ?? null,
+        posterPath: show.posterPath ?? null,
+        updatedAt: now
+      });
+    }
+    for (const season of seasons) {
+      seasonStmt.run({ ...season, mediaServerType: serverType, updatedAt: now });
+    }
+    for (const episode of episodes) {
+      episodeStmt.run({ ...episode, mediaServerType: serverType, updatedAt: now });
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+
+  return { shows: shows.length, seasons: seasons.length, episodes: episodes.length };
+}
+
+// Distinct resolved TMDb ids of owned shows for the active server (later phases match these against
+// TMDb to compute missing seasons/episodes). Shows whose id never resolved are stored but excluded.
+export function getOwnedTvShowTmdbIds(): number[] {
+  const serverType = activeMediaServerType();
+  const rows = db
+    .prepare("SELECT DISTINCT tmdb_id AS tmdbId FROM tv_shows WHERE tmdb_id IS NOT NULL AND media_server_type = ? ORDER BY tmdb_id")
+    .all(serverType) as Array<{ tmdbId: number }>;
+  return rows.map((row) => row.tmdbId);
+}
+
+// Owned season + episode counts for a show (keyed by its resolved TMDb id) on the active server.
+// Aggregates across rating keys in case a show is split into multiple library entries.
+export function getOwnedSeasonsForShow(tmdbId: number): Array<{ seasonNumber: number; ownedEpisodeCount: number }> {
+  const serverType = activeMediaServerType();
+  return db
+    .prepare(
+      `SELECT s.season_number AS seasonNumber, SUM(s.owned_episode_count) AS ownedEpisodeCount
+       FROM tv_seasons s
+       JOIN tv_shows sh ON sh.rating_key = s.show_rating_key AND sh.media_server_type = s.media_server_type
+       WHERE sh.tmdb_id = ? AND sh.media_server_type = ?
+       GROUP BY s.season_number
+       ORDER BY s.season_number`
+    )
+    .all(tmdbId, serverType) as Array<{ seasonNumber: number; ownedEpisodeCount: number }>;
+}
+
+export function getTvLibraryStats() {
+  const serverType = activeMediaServerType();
+  const shows = db.prepare("SELECT COUNT(*) AS count FROM tv_shows WHERE media_server_type = ?").get(serverType) as { count: number };
+  const seasons = db.prepare("SELECT COUNT(*) AS count FROM tv_seasons WHERE media_server_type = ?").get(serverType) as { count: number };
+  const episodes = db.prepare("SELECT COUNT(*) AS count FROM tv_episodes WHERE media_server_type = ?").get(serverType) as { count: number };
+  const updated = db
+    .prepare("SELECT MAX(updated_at) AS updatedAt FROM tv_shows WHERE media_server_type = ?")
+    .get(serverType) as { updatedAt: string | null };
+  return {
+    showCount: shows.count,
+    seasonCount: seasons.count,
+    episodeCount: episodes.count,
+    lastScannedAt: updated.updatedAt
+  };
 }
 
 export function getLibraryStats() {

@@ -82,13 +82,35 @@ function initialPosterSize() {
   return window.innerWidth <= 700 ? 150 : 210;
 }
 
+// Remember the last-selected Movies/TV mode within the session (and across reloads), defaulting to
+// Movies. Guarded for SSR/private-mode like the collections prefs the app already persists.
+const MEDIA_KIND_KEY = "mediagap:media-kind";
+
+function readStoredMediaKind(): "movie" | "tv" {
+  if (typeof window === "undefined") return "movie";
+  try {
+    return window.localStorage.getItem(MEDIA_KIND_KEY) === "tv" ? "tv" : "movie";
+  } catch {
+    return "movie";
+  }
+}
+
+interface TvStats {
+  showCount: number;
+  seasonCount: number;
+  episodeCount: number;
+  lastScannedAt: string | null;
+}
+
+const EMPTY_TV_STATS: TvStats = { showCount: 0, seasonCount: 0, episodeCount: 0, lastScannedAt: null };
+
 export function App() {
   const [settings, setSettings] = useState<AppSettings>(EMPTY_SETTINGS);
   const [apiMeta, setApiMeta] = useState<AppMeta | null>(null);
   const [activeView, setActiveView] = useState<"search" | "collections">("search");
-  const [mediaKind, setMediaKind] = useState<"movie" | "tv">("movie");
+  const [mediaKind, setMediaKind] = useState<"movie" | "tv">(readStoredMediaKind);
   const [stats, setStats] = useState<{ movieCount: number; lastScannedAt: string | null }>({ movieCount: 0, lastScannedAt: null });
-  const [tvStats, setTvStats] = useState<{ showCount: number; lastScannedAt: string | null }>({ showCount: 0, lastScannedAt: null });
+  const [tvStats, setTvStats] = useState<TvStats>(EMPTY_TV_STATS);
   const [query, setQuery] = useState("");
   const [type, setType] = useState<SearchType>("person");
   const [traktConnected, setTraktConnected] = useState(false);
@@ -168,6 +190,15 @@ export function App() {
     document.documentElement.dataset.theme = settings.themeMode;
   }, [settings.themeMode]);
 
+  // Remember the last-selected Movies/TV mode across reloads (best-effort).
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(MEDIA_KIND_KEY, mediaKind);
+    } catch {
+      // Ignore private-mode/quota errors; the in-session state still works.
+    }
+  }, [mediaKind]);
+
   useEffect(() => {
     setMoviePage(0);
   }, [moviesPerPage, movieSort, movieSortDirection, searchResponse.results]);
@@ -230,7 +261,7 @@ export function App() {
   async function bootstrap() {
     void api.meta().then(setApiMeta).catch(() => setApiMeta(null));
     void api.traktStatus().then((status) => setTraktConnected(status.connected)).catch(() => setTraktConnected(false));
-    void api.tvStats().then(setTvStats).catch(() => setTvStats({ showCount: 0, lastScannedAt: null }));
+    void api.tvStats().then(setTvStats).catch(() => setTvStats(EMPTY_TV_STATS));
     void loadCollections();
     try {
       const [loadedSettings, loadedStats] = await Promise.all([api.settings(), api.stats()]);
@@ -264,8 +295,8 @@ export function App() {
 
     const nextServerName = mediaServerLabel(saved.mediaServerType);
     setStats({ movieCount: 0, lastScannedAt: null });
-    setTvStats({ showCount: 0, lastScannedAt: null });
-    void api.tvStats().then(setTvStats).catch(() => setTvStats({ showCount: 0, lastScannedAt: null }));
+    setTvStats(EMPTY_TV_STATS);
+    void api.tvStats().then(setTvStats).catch(() => setTvStats(EMPTY_TV_STATS));
     setSearchResponse({ query: "", results: [] });
     setSuggestions([]);
     setSuggestionsOpen(false);
@@ -563,14 +594,23 @@ export function App() {
 
         <section className="stats-panel" aria-label="Library stats">
           <div className={hasExtraStats ? "stats-strip" : "stats-strip stats-strip-single"}>
-            <Stat label={`${activeServerName} movies`} value={stats.movieCount.toLocaleString()} />
-            {tvMode ? <Stat label={`${activeServerName} shows`} value={tvStats.showCount.toLocaleString()} /> : null}
-            {showMovieResultStats ? (
+            {tvMode ? (
               <>
-                <Stat label="Owned in results" value={ownedCount.toLocaleString()} />
-                <Stat label="Missing in results" value={missingCount.toLocaleString()} />
+                <Stat label={`${activeServerName} shows`} value={tvStats.showCount.toLocaleString()} />
+                <Stat label="Seasons" value={tvStats.seasonCount.toLocaleString()} />
+                <Stat label="Episodes" value={tvStats.episodeCount.toLocaleString()} />
               </>
-            ) : null}
+            ) : (
+              <>
+                <Stat label={`${activeServerName} movies`} value={stats.movieCount.toLocaleString()} />
+                {showMovieResultStats ? (
+                  <>
+                    <Stat label="Owned in results" value={ownedCount.toLocaleString()} />
+                    <Stat label="Missing in results" value={missingCount.toLocaleString()} />
+                  </>
+                ) : null}
+              </>
+            )}
             <div className="last-scan">
               <Database size={18} />
               {lastScanLabel}

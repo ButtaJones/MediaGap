@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, Tv, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Maximize2, Tv, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type {
@@ -9,6 +9,7 @@ import type {
   TvShowResult
 } from "../../shared/types";
 import { api } from "../lib/api";
+import { PosterLightbox } from "./PosterLightbox";
 import { ownershipPercent, tvSeasonSummaryText } from "./TvShowGrid";
 
 interface TvShowDetailModalProps {
@@ -56,9 +57,18 @@ function formatAirDate(airDate: string | null): string | null {
   return parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
+function formatVotes(votes: number): string {
+  if (votes >= 1_000_000) return `${(votes / 1_000_000).toFixed(1)}M`;
+  if (votes >= 1_000) return `${Math.round(votes / 1_000)}K`;
+  return votes.toLocaleString();
+}
+
 export function TvShowDetailModal({ show, detail, loading, error, serverName, onClose }: TvShowDetailModalProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [seasonState, setSeasonState] = useState<Record<number, SeasonLoadState>>({});
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  // Reset the enlarge overlay whenever the modal opens a different show.
+  useEffect(() => setLightboxOpen(false), [show?.tmdbId]);
   // Tracks which seasons have a fetch in flight or done — checked synchronously so concurrent
   // calls (auto-expand + a quick manual toggle) never double-fetch (state updaters run lazily).
   const requestedRef = useRef<Set<number>>(new Set());
@@ -118,6 +128,14 @@ export function TvShowDetailModal({ show, detail, loading, error, serverName, on
   const total = detail?.totalSeasonCount ?? show.totalSeasonCount;
   const posterPath = detail?.posterPath ?? show.posterPath;
   const summary = tvSeasonSummaryText(detail ?? show);
+  const titleLogo = detail?.logoPath ?? null;
+  const hasRatings = Boolean(detail?.imdbRating || detail?.tmdbRating);
+  const statusBadge =
+    status === "complete"
+      ? { className: "inline-badge owned", label: "Complete" }
+      : status === "partial"
+        ? { className: "inline-badge partial", label: "In progress" }
+        : { className: "inline-badge missing", label: "Missing" };
 
   return (
     <div
@@ -133,25 +151,60 @@ export function TvShowDetailModal({ show, detail, loading, error, serverName, on
         <div
           className="details-banner"
           style={detail?.backdropPath ? ({ backgroundImage: `url(${detail.backdropPath})` } as CSSProperties) : undefined}
-        />
-        <button className="icon-button details-close" onClick={onClose} aria-label="Close show details">
-          <X size={20} />
-        </button>
+        >
+          <button className="icon-button details-close" onClick={onClose} aria-label="Close show details">
+            <X size={20} />
+          </button>
+        </div>
 
         <div className="details-identity">
-          <div className="details-poster">
-            {posterPath ? <img src={posterPath} alt="" /> : <Tv size={44} />}
-          </div>
+          {posterPath ? (
+            <button type="button" className="details-poster details-poster-zoom" onClick={() => setLightboxOpen(true)} aria-label="Enlarge poster">
+              <img src={posterPath} alt="" />
+              <span className="poster-zoom-hint">
+                <Maximize2 size={16} />
+              </span>
+            </button>
+          ) : (
+            <div className="details-poster">
+              <Tv size={44} />
+            </div>
+          )}
           <div className="details-title">
-            <h2>{title}</h2>
+            <span className={statusBadge.className}>{statusBadge.label}</span>
+            {titleLogo ? <img className="details-logo" src={titleLogo} alt={title} /> : <h2>{title}</h2>}
+            {detail?.tagline ? <p className="details-tagline">{detail.tagline}</p> : null}
             <div className="details-meta">
               {year ? <span>{year}</span> : null}
               {detail?.tmdbStatus ? <span>{detail.tmdbStatus}</span> : null}
-              <span className={`inline-badge ${status === "missing" ? "missing" : status === "partial" ? "partial" : "owned"}`}>
-                {status === "complete" ? "Complete" : status === "partial" ? "In progress" : "Missing"}
-              </span>
+              {detail?.network ? (
+                <span className="tv-network">
+                  {detail.networkLogoPath ? (
+                    <img className="tv-network-logo" src={detail.networkLogoPath} alt={detail.network} />
+                  ) : (
+                    detail.network
+                  )}
+                </span>
+              ) : null}
             </div>
-            {detail?.tagline ? <p className="details-tagline">{detail.tagline}</p> : null}
+            {hasRatings ? (
+              <div className="ratings-row" aria-label="Show ratings">
+                {detail?.imdbRating ? (
+                  <span className="rating-pill">
+                    <span className="imdb-badge">IMDb</span>
+                    {detail.imdbRating.toFixed(1)}
+                    {detail.imdbVotes ? <small>{formatVotes(detail.imdbVotes)}</small> : null}
+                  </span>
+                ) : null}
+                {detail?.tmdbRating ? (
+                  <span className="rating-pill">
+                    <span className="tmdb-badge">TMDb</span>
+                    {Math.round(detail.tmdbRating * 10)}%
+                    {detail.tmdbVotes ? <small>{formatVotes(detail.tmdbVotes)}</small> : null}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <div className="tv-detail-progress">
               <div className="tv-detail-progress-head">
                 <strong>{summary}</strong>
@@ -241,6 +294,9 @@ export function TvShowDetailModal({ show, detail, loading, error, serverName, on
           </div>
         </div>
       </div>
+      {lightboxOpen ? (
+        <PosterLightbox posterUrl={posterPath} alt={title} onClose={() => setLightboxOpen(false)} />
+      ) : null}
     </div>
   );
 }

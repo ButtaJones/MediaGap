@@ -1,5 +1,7 @@
-import { Calendar, Clock, Download, ExternalLink, Film, Layers, PlayCircle, UserRound, X } from "lucide-react";
+import { Calendar, Clock, Download, ExternalLink, Film, Layers, Maximize2, PlayCircle, UserRound, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { MovieCollectionSummary, MovieDetails, MovieResult } from "../../shared/types";
+import { PosterLightbox } from "./PosterLightbox";
 import { SeerrRequestButton } from "./SeerrRequestButton";
 
 interface MovieDetailsModalProps {
@@ -35,6 +37,10 @@ export function MovieDetailsModal({
   serverName,
   seerrEnabled = false
 }: MovieDetailsModalProps) {
+  const [lightboxOpen, setLightboxOpen] = useState(false);
+  // Reset the enlarge overlay whenever the modal opens a different movie.
+  useEffect(() => setLightboxOpen(false), [movie?.tmdbId]);
+
   if (!movie) return null;
   const display = details ?? movie;
   const titleLogo = details?.logoPath ?? null;
@@ -57,9 +63,18 @@ export function MovieDetailsModal({
           </button>
         </div>
         <div className="details-identity">
-          <div className="details-poster">
-            {display.posterPath ? <img src={display.posterPath} alt="" /> : <Film size={42} />}
-          </div>
+          {display.posterPath ? (
+            <button type="button" className="details-poster details-poster-zoom" onClick={() => setLightboxOpen(true)} aria-label="Enlarge poster">
+              <img src={display.posterPath} alt="" />
+              <span className="poster-zoom-hint">
+                <Maximize2 size={16} />
+              </span>
+            </button>
+          ) : (
+            <div className="details-poster">
+              <Film size={42} />
+            </div>
+          )}
           <div className="details-title">
             <span className={display.owned ? "inline-badge owned" : "inline-badge missing"}>{display.owned ? `In ${serverName}` : "Missing"}</span>
             {titleLogo ? (
@@ -180,6 +195,9 @@ export function MovieDetailsModal({
           </section>
         </div>
       </div>
+      {lightboxOpen ? (
+        <PosterLightbox posterUrl={display.posterPath} alt={display.title} onClose={() => setLightboxOpen(false)} />
+      ) : null}
     </div>
   );
 }

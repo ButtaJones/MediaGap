@@ -42,6 +42,7 @@ const IMAGE_BASE = "https://image.tmdb.org/t/p/w342";
 const BACKDROP_BASE = "https://image.tmdb.org/t/p/w780";
 const LOGO_BASE = "https://image.tmdb.org/t/p/original";
 const STILL_BASE = "https://image.tmdb.org/t/p/w227_and_h127_bestv2";
+const NETWORK_LOGO_BASE = "https://image.tmdb.org/t/p/w154";
 const IMDB_RATINGS_URL = "https://datasets.imdbws.com/title.ratings.tsv.gz";
 let imdbRatingsPromise: Promise<Map<string, { rating: number; votes: number }>> | null = null;
 let collectionRefreshStatus: CollectionsRefreshStatus = {
@@ -95,8 +96,11 @@ interface TmdbTvDetails {
   tagline?: string | null;
   /** TMDb production status, e.g. "Returning Series" / "Ended". */
   status?: string | null;
+  vote_average?: number | null;
+  vote_count?: number | null;
   number_of_seasons?: number;
   seasons?: TmdbTvSeasonSummary[];
+  networks?: Array<{ id: number; name: string; logo_path?: string | null }>;
   external_ids?: {
     imdb_id?: string | null;
     tvdb_id?: number | null;
@@ -617,6 +621,16 @@ export async function getTvShowDetailWithOwnership(apiKey: string, tmdbId: numbe
   const details = await getTvShowDetails(apiKey, tmdbId);
   const today = todayIso();
   const owned = ownedSeasonMap(tmdbId);
+  const imdbId = details.external_ids?.imdb_id ?? null;
+
+  // Kick off the clearlogo + IMDb rating lookups in parallel with the per-season fetches below.
+  // Both degrade gracefully (null) so a failure never breaks the detail (parity with movies).
+  const logoPromise = getTvLogo(apiKey, tmdbId).catch(() => null);
+  const imdbRatingPromise = imdbId
+    ? getImdbRatings()
+        .then((ratings) => ratings.get(imdbId) ?? null)
+        .catch(() => null)
+    : Promise.resolve(null);
 
   const candidateSeasons = (details.seasons ?? []).filter(
     (season) => typeof season.season_number === "number" && season.season_number >= 1
@@ -649,15 +663,26 @@ export async function getTvShowDetailWithOwnership(apiKey: string, tmdbId: numbe
   const ownedSeasonCount = seasons.filter((season) => season.ownedEpisodeCount >= 1).length;
   const totalSeasonCount = seasons.length;
 
+  const [logoPath, imdbRating] = await Promise.all([logoPromise, imdbRatingPromise]);
+  const primaryNetwork = details.networks?.[0] ?? null;
+
   return {
     tmdbId: details.id,
     title: details.name ?? "Untitled",
     year: yearFromDate(details.first_air_date ?? null),
     posterPath: details.poster_path ? `${IMAGE_BASE}${details.poster_path}` : null,
     backdropPath: details.backdrop_path ? `${BACKDROP_BASE}${details.backdrop_path}` : null,
+    logoPath,
     overview: details.overview,
     tagline: details.tagline || null,
     tmdbStatus: details.status || null,
+    imdbId,
+    imdbRating: imdbRating?.rating ?? null,
+    imdbVotes: imdbRating?.votes ?? null,
+    tmdbRating: typeof details.vote_average === "number" && details.vote_average > 0 ? details.vote_average : null,
+    tmdbVotes: typeof details.vote_count === "number" ? details.vote_count : null,
+    network: primaryNetwork?.name ?? null,
+    networkLogoPath: primaryNetwork?.logo_path ? `${NETWORK_LOGO_BASE}${primaryNetwork.logo_path}` : null,
     ownedSeasonCount,
     totalSeasonCount,
     status: rollupStatus(ownedSeasonCount, totalSeasonCount),
@@ -801,6 +826,21 @@ async function getMovieLogo(apiKey: string, tmdbId: number): Promise<string | nu
   if (cached) return cached.logoPath;
 
   const response = await tmdbFetch<TmdbImagesResponse>(apiKey, `/movie/${tmdbId}/images`, {
+    include_image_language: "en,null"
+  });
+  const logo = pickTmdbLogo(response.logos ?? []);
+  const logoPath = logo?.file_path ? `${LOGO_BASE}${logo.file_path}` : null;
+  cacheSet(key, { logoPath });
+  return logoPath;
+}
+
+// TV clearlogo, mirroring getMovieLogo (English-or-language-neutral PNG, ranked the same way).
+async function getTvLogo(apiKey: string, tmdbId: number): Promise<string | null> {
+  const key = `tmdb:tv-logo:${tmdbId}`;
+  const cached = cacheGet<{ logoPath: string | null }>(key);
+  if (cached) return cached.logoPath;
+
+  const response = await tmdbFetch<TmdbImagesResponse>(apiKey, `/tv/${tmdbId}/images`, {
     include_image_language: "en,null"
   });
   const logo = pickTmdbLogo(response.logos ?? []);

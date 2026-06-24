@@ -277,9 +277,19 @@ export interface TvShowResult {
 
 export interface TvShowDetail extends TvShowResult {
   backdropPath: string | null;
+  /** Clearlogo title image (parity with movies); null falls back to the text title. */
+  logoPath: string | null;
   tagline: string | null;
   /** TMDb production status, e.g. "Returning Series" / "Ended", when available. */
   tmdbStatus: string | null;
+  imdbId: string | null;
+  imdbRating: number | null;
+  imdbVotes: number | null;
+  tmdbRating: number | null;
+  tmdbVotes: number | null;
+  /** Primary TMDb network name (e.g. HBO, Netflix), null when unavailable. */
+  network: string | null;
+  networkLogoPath: string | null;
   seasons: TvSeasonSummary[];
 }
 

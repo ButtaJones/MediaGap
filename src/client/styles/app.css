@@ -1764,6 +1764,75 @@ textarea:focus {
   object-fit: cover;
 }
 
+/* Clickable poster → enlarge. Reuses .details-poster sizing; button reset + zoom cursor, with a
+   subtle corner hint that fades in on hover/focus so users know it opens the lightbox. */
+.details-poster-zoom {
+  border: 0;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.poster-zoom-hint {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(9, 18, 40, 0.66);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.details-poster-zoom:hover .poster-zoom-hint,
+.details-poster-zoom:focus-visible .poster-zoom-hint {
+  opacity: 1;
+}
+
+/* Shared poster lightbox — a universally dark overlay (theme-agnostic), above the modal. */
+.poster-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(6, 10, 20, 0.86);
+  cursor: zoom-out;
+  animation: fadeIn 140ms ease-out;
+}
+
+.poster-lightbox-img {
+  max-width: min(640px, 92vw);
+  max-height: 92vh;
+  border-radius: 10px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+}
+
+.poster-lightbox-close {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 41;
+}
+
+/* TV network in the meta row: a .details-meta span gives it the themed pill; the logo gets the same
+   dual drop-shadow the title clearlogo uses so it stays visible on light AND dark surfaces. */
+.tv-network-logo {
+  display: block;
+  height: 18px;
+  width: auto;
+  max-width: 92px;
+  object-fit: contain;
+  filter:
+    drop-shadow(0 1px 1px rgba(0, 0, 0, 0.6))
+    drop-shadow(0 0 6px rgba(255, 255, 255, 0.35));
+}
+
 .details-title {
   position: relative;
   z-index: 2;

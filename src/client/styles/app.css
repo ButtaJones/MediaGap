@@ -1164,6 +1164,162 @@ textarea:focus {
   background: #d64550;
 }
 
+.inline-badge.partial {
+  background: #c97a12;
+}
+
+/* --- TV (Phase 2): dedicated show cards + show-detail view ---
+   Reuses .movie-grid (layout), .poster-frame and .collection-progress (both already themed), and
+   the X-of-Y season math. Ownership badges are solid-color so they read on all five themes. */
+
+.media-kind-toggle {
+  margin-bottom: 14px;
+}
+
+/* Solid-color ownership badges sitting over the poster (mirrors .badge.owned / .badge.missing). */
+.badge.complete {
+  background: #06845d;
+}
+
+.badge.partial {
+  background: #c97a12;
+}
+
+.tv-card {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  width: min(100%, var(--poster-size, 210px));
+  min-width: 0;
+  border: 1px solid #dde5ef;
+  border-radius: 8px;
+  overflow: hidden;
+  background: white;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.tv-card-body {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.tv-card-body h3 {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.tv-card-year {
+  margin: 0;
+  color: #647187;
+  font-size: 0.9rem;
+}
+
+.tv-card-status {
+  display: grid;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.tv-card-status small {
+  color: #5f6f87;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.tv-card-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 4px;
+  color: var(--accent);
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+/* Show-detail drill-down: reuses the themed .details-modal / .details-banner / .details-poster
+   header shell, with a dedicated seasons list below. */
+.tv-detail-modal {
+  width: min(900px, 100%);
+}
+
+.tv-detail-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  max-width: 460px;
+}
+
+.tv-detail-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  /* No explicit color: inherits the themed .details-title color so it reads on all five themes. */
+  font-size: 0.95rem;
+}
+
+.tv-detail-body {
+  padding: 4px 24px 24px;
+}
+
+.tv-detail-subhead {
+  /* Inherits the themed .details-modal text color (light theme: dark ink; dark themes: light). */
+  margin: 4px 0 12px;
+}
+
+.tv-season-list {
+  display: grid;
+  gap: 10px;
+}
+
+.tv-season-row {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d7e3ef;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.66);
+  padding: 12px 14px;
+}
+
+.tv-season-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.tv-season-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.tv-season-name small {
+  color: #5f6f87;
+  font-weight: 700;
+}
+
+.tv-season-check {
+  flex: 0 0 auto;
+  color: #06845d;
+}
+
+.tv-season-count {
+  color: #5f6f87;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .overview.compact {
   -webkit-line-clamp: 2;
 }
@@ -2204,6 +2360,10 @@ html[data-theme="dark"] .collection-card,
 html[data-theme="plex"] .collection-card,
 html[data-theme="dark"] .movie-card,
 html[data-theme="plex"] .movie-card,
+html[data-theme="dark"] .tv-card,
+html[data-theme="plex"] .tv-card,
+html[data-theme="dark"] .tv-season-row,
+html[data-theme="plex"] .tv-season-row,
 html[data-theme="dark"] .movie-list-row,
 html[data-theme="plex"] .movie-list-row,
 html[data-theme="dark"] .drawer,
@@ -2286,6 +2446,10 @@ html[data-theme="dark"] .segmented-control button {
 
 html[data-theme="dark"] .muted-line,
 html[data-theme="dark"] .collection-toggle-button small,
+html[data-theme="dark"] .tv-card-year,
+html[data-theme="dark"] .tv-card-status small,
+html[data-theme="dark"] .tv-season-count,
+html[data-theme="dark"] .tv-season-name small,
 html[data-theme="dark"] .movie-copy p,
 html[data-theme="dark"] .connection-title p,
 html[data-theme="dark"] .release-row span,
@@ -2405,6 +2569,8 @@ html[data-theme="plex"] .panel,
 html[data-theme="plex"] .connection-card,
 html[data-theme="plex"] .collection-card,
 html[data-theme="plex"] .movie-card,
+html[data-theme="plex"] .tv-card,
+html[data-theme="plex"] .tv-season-row,
 html[data-theme="plex"] .movie-list-row,
 html[data-theme="plex"] .drawer,
 html[data-theme="plex"] .tracker-drawer,
@@ -2488,6 +2654,10 @@ html[data-theme="plex"] .tracker-tabs span {
 
 html[data-theme="plex"] .muted-line,
 html[data-theme="plex"] .collection-toggle-button small,
+html[data-theme="plex"] .tv-card-year,
+html[data-theme="plex"] .tv-card-status small,
+html[data-theme="plex"] .tv-season-count,
+html[data-theme="plex"] .tv-season-name small,
 html[data-theme="plex"] .movie-copy p,
 html[data-theme="plex"] .connection-title p,
 html[data-theme="plex"] .release-row span,
@@ -2591,6 +2761,8 @@ html[data-theme="emby"] :is(
   .connection-card,
   .collection-card,
   .movie-card,
+  .tv-card,
+  .tv-season-row,
   .movie-list-row,
   .drawer,
   .tracker-drawer,
@@ -2657,6 +2829,10 @@ html[data-theme="emby"] :is(.collection-toolbar .segmented-control span, .tracke
 html[data-theme="emby"] :is(
   .muted-line,
   .collection-toggle-button small,
+  .tv-card-year,
+  .tv-card-status small,
+  .tv-season-count,
+  .tv-season-name small,
   .movie-copy p,
   .connection-title p,
   .release-row span,
@@ -2753,6 +2929,8 @@ html[data-theme="jellyfin"] :is(
   .connection-card,
   .collection-card,
   .movie-card,
+  .tv-card,
+  .tv-season-row,
   .movie-list-row,
   .drawer,
   .tracker-drawer,
@@ -2819,6 +2997,10 @@ html[data-theme="jellyfin"] :is(.collection-toolbar .segmented-control span, .tr
 html[data-theme="jellyfin"] :is(
   .muted-line,
   .collection-toggle-button small,
+  .tv-card-year,
+  .tv-card-status small,
+  .tv-season-count,
+  .tv-season-name small,
   .movie-copy p,
   .connection-title p,
   .release-row span,

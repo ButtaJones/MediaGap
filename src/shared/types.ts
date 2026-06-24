@@ -227,6 +227,74 @@ export interface CollectionsResponse {
   collections: MovieCollectionSummary[];
 }
 
+// --- TV view types (Phase 2: search + ownership cards + show-detail drill-down) ---
+// Ownership rolls up the owned tv_seasons/episodes (Phase 1) against TMDb's season list, with the
+// same X-of-Y partial-completion language the movie collections use. Season 0 and seasons with no
+// aired episodes are excluded from the eligible totals so an unreleased season never reads "missing".
+
+export type TvOwnershipStatus = "complete" | "partial" | "missing";
+
+export interface TvSeasonSummary {
+  seasonNumber: number;
+  /** TMDb aired-episode count for the season (future-dated episodes excluded). */
+  episodeCount: number;
+  /** Episodes the user owns in this season (from getOwnedSeasonsForShow). */
+  ownedEpisodeCount: number;
+  airYear: number | null;
+  status: TvOwnershipStatus;
+}
+
+export interface TvShowResult {
+  tmdbId: number;
+  title: string;
+  year: number | null;
+  posterPath: string | null;
+  overview?: string;
+  /** Eligible seasons the user owns at least one episode of (the X in "X of Y seasons"). */
+  ownedSeasonCount: number;
+  /** Eligible (aired, non-zero) seasons on TMDb (the Y). */
+  totalSeasonCount: number;
+  status: TvOwnershipStatus;
+  /** Whether the user has the show at all in the active server's library. */
+  inLibrary: boolean;
+}
+
+export interface TvShowDetail extends TvShowResult {
+  backdropPath: string | null;
+  tagline: string | null;
+  /** TMDb production status, e.g. "Returning Series" / "Ended", when available. */
+  tmdbStatus: string | null;
+  seasons: TvSeasonSummary[];
+}
+
+export interface TvSearchResponse {
+  query: string;
+  results: TvShowResult[];
+}
+
+// Lightweight TV search-as-you-type suggestion (no ownership rollup, so the dropdown stays fast).
+export interface TvSuggestion {
+  tmdbId: number;
+  title: string;
+  year: number | null;
+  posterPath: string | null;
+}
+
+export interface TvSuggestResponse {
+  query: string;
+  suggestions: TvSuggestion[];
+}
+
+// Result of a UI-triggered TV library scan (the counts the TV stats strip refreshes from).
+export interface TvScanResponse {
+  shows: number;
+  seasons: number;
+  episodes: number;
+  sections: string[];
+  futureEpisodesExcluded: number;
+  scannedAt: string;
+}
+
 export interface CollectionsRefreshResponse extends CollectionsResponse {
   checkedMovies: number;
   fetchedCollections: number;

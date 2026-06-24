@@ -30,11 +30,14 @@ import {
   getDiscoverCollections,
   getMovieDetails,
   getMoviesByTmdbIds,
+  getTvShowDetailWithOwnership,
   resolveTvLibraryTmdbIds,
   searchCompanyMovies,
   searchMovies,
   searchPersonCredits,
   searchSuggestions,
+  searchTvShows,
+  searchTvSuggestions,
   startContinueCollectionsRefresh,
   testTmdbConnection
 } from "../integrations/tmdb.js";
@@ -358,6 +361,43 @@ api.post("/scan/tv", handleTvScan);
 api.get("/tv/stats", (_req, res, next) => {
   try {
     res.json(getTvLibraryStats());
+  } catch (error) {
+    next(error);
+  }
+});
+
+// TV show title search with per-show ownership (owns X of Y seasons) overlaid from scanned data.
+api.get("/tv/search", async (req, res, next) => {
+  try {
+    const settings = requireSettings();
+    const query = z.string().min(1).parse(req.query.q);
+    const results = await searchTvShows(settings.tmdbApiKey, query);
+    res.json({ query, results });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Lightweight search-as-you-type suggestions for TV (poster + title + year, no ownership rollup).
+api.get("/tv/suggest", async (req, res, next) => {
+  try {
+    const settings = requireSettings();
+    const query = z.string().min(2).parse(req.query.q);
+    const suggestions = await searchTvSuggestions(settings.tmdbApiKey, query);
+    res.json({ query, suggestions });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Show-detail drill-down: overall + per-season owned/missing/partial states (season 0 and
+// entirely-unaired seasons excluded). Registered after /tv/search so the literal wins over :tmdbId.
+api.get("/tv/:tmdbId/detail", async (req, res, next) => {
+  try {
+    const settings = requireSettings();
+    const tmdbId = z.coerce.number().int().positive().parse(req.params.tmdbId);
+    const detail = await getTvShowDetailWithOwnership(settings.tmdbApiKey, tmdbId);
+    res.json(detail);
   } catch (error) {
     next(error);
   }

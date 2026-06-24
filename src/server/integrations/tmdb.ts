@@ -1,6 +1,8 @@
 import {
   cacheGet,
   cacheSet,
+  getOwnedSeasonsForShow,
+  getOwnedTvShowTmdbIds,
   listCachedCollections,
   listCollectionsPendingFanart,
   listMissingCollectionCacheIds,
@@ -25,7 +27,12 @@ import type {
   MovieDetails,
   MovieResult,
   PersonHeader,
-  SearchSuggestion
+  SearchSuggestion,
+  TvOwnershipStatus,
+  TvSeasonSummary,
+  TvShowDetail,
+  TvShowResult,
+  TvSuggestion
 } from "../../shared/types.js";
 
 const TMDB_BASE = "https://api.themoviedb.org/3";
@@ -80,6 +87,11 @@ interface TmdbTvDetails {
   name?: string;
   first_air_date?: string | null;
   poster_path?: string | null;
+  backdrop_path?: string | null;
+  overview?: string;
+  tagline?: string | null;
+  /** TMDb production status, e.g. "Returning Series" / "Ended". */
+  status?: string | null;
   number_of_seasons?: number;
   seasons?: TmdbTvSeasonSummary[];
   external_ids?: {
@@ -462,6 +474,162 @@ export async function getTvSeasonDetails(apiKey: string, tmdbId: number, seasonN
   const raw = await tmdbFetch<TmdbTvSeasonDetails>(apiKey, `/tv/${tmdbId}/season/${seasonNumber}`);
   cacheSet(key, raw);
   return raw;
+}
+
+// --- TV ownership (Phase 2) ---
+// Roll up owned seasons/episodes against TMDb's season list with the same X-of-Y language the movie
+// collections use. Season 0 and seasons with no aired episodes are excluded so an unreleased season
+// never reads as "missing" (the TV analogue of the collections bloat filter).
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function isAired(date: string | null | undefined, today: string): boolean {
+  if (!date) return false;
+  return date.slice(0, 10) <= today;
+}
+
+function rollupStatus(owned: number, total: number): TvOwnershipStatus {
+  if (owned <= 0) return "missing";
+  if (owned >= total) return "complete";
+  return "partial";
+}
+
+// Card-level eligibility uses the cheaper season SUMMARY air_date (one /tv/{id} call per show): a
+// season counts toward the Y when it has aired (air_date present and in the past) and has episodes.
+function eligibleSummarySeasons(details: TmdbTvDetails, today: string): TmdbTvSeasonSummary[] {
+  return (details.seasons ?? []).filter(
+    (season) =>
+      typeof season.season_number === "number" &&
+      season.season_number >= 1 &&
+      (season.episode_count ?? 0) > 0 &&
+      isAired(season.air_date, today)
+  );
+}
+
+function ownedSeasonMap(tmdbId: number): Map<number, number> {
+  const map = new Map<number, number>();
+  for (const season of getOwnedSeasonsForShow(tmdbId)) {
+    map.set(season.seasonNumber, season.ownedEpisodeCount);
+  }
+  return map;
+}
+
+function toTvShowResult(raw: TmdbMovie, details: TmdbTvDetails, today: string): TvShowResult {
+  const owned = ownedSeasonMap(details.id);
+  const eligible = eligibleSummarySeasons(details, today);
+  const ownedSeasonCount = eligible.filter((season) => (owned.get(season.season_number as number) ?? 0) >= 1).length;
+  const totalSeasonCount = eligible.length;
+  return {
+    tmdbId: details.id,
+    title: raw.name ?? raw.title ?? details.name ?? "Untitled",
+    year: yearFromDate(raw.first_air_date ?? details.first_air_date ?? null),
+    posterPath: raw.poster_path ? `${IMAGE_BASE}${raw.poster_path}` : details.poster_path ? `${IMAGE_BASE}${details.poster_path}` : null,
+    overview: raw.overview,
+    ownedSeasonCount,
+    totalSeasonCount,
+    status: rollupStatus(ownedSeasonCount, totalSeasonCount),
+    inLibrary: owned.size > 0
+  };
+}
+
+// Search TV shows by title and tag each with ownership status. Raw TMDb hits are cached (owned data
+// is overlaid live so a fresh scan immediately changes the badges), and per-show detail lookups are
+// batched like the collections refresh so a search stays responsive.
+export async function searchTvShows(apiKey: string, query: string): Promise<TvShowResult[]> {
+  const key = `tmdb:search-tv:${query}`;
+  const cached = cacheGet<TmdbMovie[]>(key);
+  const raw =
+    cached ??
+    (await tmdbFetch<{ results: TmdbMovie[] }>(apiKey, "/search/tv", { query, include_adult: "false" })).results;
+  if (!cached) cacheSet(key, raw);
+
+  const today = todayIso();
+  const candidates = raw.filter((show) => show.id).slice(0, 20);
+  const results: TvShowResult[] = [];
+  for (const batch of chunks(candidates, 5)) {
+    const settled = await Promise.allSettled(
+      batch.map(async (show) => toTvShowResult(show, await getTvShowDetails(apiKey, show.id), today))
+    );
+    for (const outcome of settled) {
+      if (outcome.status === "fulfilled") results.push(outcome.value);
+    }
+  }
+  return results;
+}
+
+// Lightweight search-as-you-type suggestions: just title/year/poster from /search/tv, with NO
+// per-show ownership rollup so the dropdown stays responsive (the full search overlays ownership).
+export async function searchTvSuggestions(apiKey: string, query: string): Promise<TvSuggestion[]> {
+  const shows = await tmdbFetch<{ results: TmdbMovie[] }>(apiKey, "/search/tv", { query, include_adult: "false" });
+  return shows.results.slice(0, 6).map((show) => ({
+    tmdbId: show.id,
+    title: show.name ?? show.title ?? "Untitled",
+    year: yearFromDate(show.first_air_date ?? null),
+    posterPath: show.poster_path ? `${IMAGE_BASE}${show.poster_path}` : null
+  }));
+}
+
+// Precise show-detail ownership: fetch each eligible season's episode list to count AIRED episodes
+// (entirely-unaired seasons are dropped, not shown as missing) and compare against owned counts.
+export async function getTvShowDetailWithOwnership(apiKey: string, tmdbId: number): Promise<TvShowDetail> {
+  const details = await getTvShowDetails(apiKey, tmdbId);
+  const today = todayIso();
+  const owned = ownedSeasonMap(tmdbId);
+
+  const candidateSeasons = (details.seasons ?? []).filter(
+    (season) => typeof season.season_number === "number" && season.season_number >= 1
+  );
+
+  const seasons: TvSeasonSummary[] = [];
+  for (const batch of chunks(candidateSeasons, 4)) {
+    const settled = await Promise.allSettled(
+      batch.map(async (season) => {
+        const seasonNumber = season.season_number as number;
+        const detail = await getTvSeasonDetails(apiKey, tmdbId, seasonNumber);
+        const airedEpisodes = (detail.episodes ?? []).filter((episode) => isAired(episode.air_date, today)).length;
+        return { season, seasonNumber, airedEpisodes };
+      })
+    );
+    for (const outcome of settled) {
+      if (outcome.status !== "fulfilled") continue;
+      const { season, seasonNumber, airedEpisodes } = outcome.value;
+      if (airedEpisodes <= 0) continue; // entirely unaired season → not "missing", just unreleased
+      const ownedEpisodeCount = owned.get(seasonNumber) ?? 0;
+      seasons.push({
+        seasonNumber,
+        episodeCount: airedEpisodes,
+        ownedEpisodeCount: Math.min(ownedEpisodeCount, airedEpisodes),
+        airYear: yearFromDate(season.air_date ?? null),
+        status: ownedEpisodeCount <= 0 ? "missing" : ownedEpisodeCount >= airedEpisodes ? "complete" : "partial"
+      });
+    }
+  }
+
+  seasons.sort((a, b) => a.seasonNumber - b.seasonNumber);
+  const ownedSeasonCount = seasons.filter((season) => season.ownedEpisodeCount >= 1).length;
+  const totalSeasonCount = seasons.length;
+
+  return {
+    tmdbId: details.id,
+    title: details.name ?? "Untitled",
+    year: yearFromDate(details.first_air_date ?? null),
+    posterPath: details.poster_path ? `${IMAGE_BASE}${details.poster_path}` : null,
+    backdropPath: details.backdrop_path ? `${BACKDROP_BASE}${details.backdrop_path}` : null,
+    overview: details.overview,
+    tagline: details.tagline || null,
+    tmdbStatus: details.status || null,
+    ownedSeasonCount,
+    totalSeasonCount,
+    status: rollupStatus(ownedSeasonCount, totalSeasonCount),
+    inLibrary: owned.size > 0,
+    seasons
+  };
+}
+
+export function getOwnedTvShowCount(): number {
+  return getOwnedTvShowTmdbIds().length;
 }
 
 export async function searchSuggestions(

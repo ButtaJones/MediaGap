@@ -18,7 +18,11 @@ import type {
   ScanResponse,
   SearchResponse,
   SearchSuggestion,
-  TraktStatus
+  TraktStatus,
+  TvScanResponse,
+  TvSearchResponse,
+  TvShowDetail,
+  TvSuggestResponse
 } from "../../shared/types";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -55,6 +59,8 @@ export const api = {
       body: JSON.stringify(settings)
     }),
   stats: () => request<{ movieCount: number; lastScannedAt: string | null }>("/stats"),
+  tvStats: () =>
+    request<{ showCount: number; seasonCount: number; episodeCount: number; lastScannedAt: string | null }>("/tv/stats"),
   testConnection: (service: "media-server" | "plex" | "tmdb" | "nzbhydra" | "seerr" | "downloader", settings?: AppSettings) =>
     request<ConnectionResult>(`/connections/${service}/test`, {
       method: "POST",
@@ -74,6 +80,15 @@ export const api = {
     }),
   search: (query: string, type: "person" | "movie" | "studio") =>
     request<SearchResponse>(`/search?q=${encodeURIComponent(query)}&type=${type}`),
+  searchTv: (query: string) => request<TvSearchResponse>(`/tv/search?q=${encodeURIComponent(query)}`),
+  tvSuggest: (query: string) => request<TvSuggestResponse>(`/tv/suggest?q=${encodeURIComponent(query)}`),
+  tvShowDetail: (tmdbId: number) => request<TvShowDetail>(`/tv/${tmdbId}/detail`),
+  tvLibraries: () => request<{ libraries: MediaServerLibrary[] }>("/media-server/tv/libraries"),
+  scanTv: (libraryIds: string[]) =>
+    request<TvScanResponse>("/media-server/scan/tv", {
+      method: "POST",
+      body: JSON.stringify({ libraryIds })
+    }),
   traktStatus: () => request<TraktStatus>("/trakt/status"),
   traktConnect: () => request<TraktStatus>("/trakt/connect", { method: "POST" }),
   traktDisconnect: () => request<TraktStatus>("/trakt/disconnect", { method: "POST" }),

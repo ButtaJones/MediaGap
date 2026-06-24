@@ -1,10 +1,11 @@
-import { Activity, Database, Film, Grid2X2, List, Menu, Moon, RefreshCw, Search, Settings, Sun, X } from "lucide-react";
+import { Activity, Database, Film, Grid2X2, List, Menu, Moon, RefreshCw, Search, Settings, Sun, Tv, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { THEME_MODES, TRAKT_SOURCE_LABELS, mediaServerLabel, themeLabel } from "../shared/types";
 import type { AppMeta, AppSettings, MediaServerLibrary, MovieCollectionSummary, MovieDetails, MovieResult, SearchResponse, SearchSuggestion, ThemeMode, TraktSource } from "../shared/types";
 import { DownloadStatusBar } from "./components/DownloadStatusBar";
 import { DownloadMonitor } from "./components/DownloadMonitor";
 import { MovieGrid } from "./components/MovieGrid";
+import { TvSearchView } from "./components/TvSearchView";
 import { CollectionsView } from "./components/CollectionsView";
 import { MovieDetailsModal } from "./components/MovieDetailsModal";
 import { PersonResultHeader } from "./components/PersonResultHeader";
@@ -85,7 +86,9 @@ export function App() {
   const [settings, setSettings] = useState<AppSettings>(EMPTY_SETTINGS);
   const [apiMeta, setApiMeta] = useState<AppMeta | null>(null);
   const [activeView, setActiveView] = useState<"search" | "collections">("search");
+  const [mediaKind, setMediaKind] = useState<"movie" | "tv">("movie");
   const [stats, setStats] = useState<{ movieCount: number; lastScannedAt: string | null }>({ movieCount: 0, lastScannedAt: null });
+  const [tvStats, setTvStats] = useState<{ showCount: number; lastScannedAt: string | null }>({ showCount: 0, lastScannedAt: null });
   const [query, setQuery] = useState("");
   const [type, setType] = useState<SearchType>("person");
   const [traktConnected, setTraktConnected] = useState(false);
@@ -106,6 +109,7 @@ export function App() {
   const [focusCollectionId, setFocusCollectionId] = useState<number | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
+  const [scanKind, setScanKind] = useState<"movie" | "tv">("movie");
   const [trackerOpen, setTrackerOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [libraries, setLibraries] = useState<MediaServerLibrary[]>([]);
@@ -125,6 +129,16 @@ export function App() {
   const ownedCount = searchResponse.results.length - missingCount;
   const hasSearchRun = searchResponse.query.trim().length > 0;
   const activeServerName = mediaServerLabel(settings.mediaServerType);
+  const tvMode = activeView === "search" && mediaKind === "tv";
+  const showMovieResultStats = !tvMode && hasSearchRun;
+  const hasExtraStats = tvMode || showMovieResultStats;
+  const lastScanLabel = tvMode
+    ? tvStats.lastScannedAt
+      ? `Last TV scan ${new Date(tvStats.lastScannedAt).toLocaleString()}`
+      : "No TV scan yet"
+    : stats.lastScannedAt
+      ? `Last scan ${new Date(stats.lastScannedAt).toLocaleString()}`
+      : "No library scan yet";
   const seerrEnabled = Boolean(settings.seerrBaseUrl && settings.seerrApiKey);
   const detailCollection = useMemo(() => {
     if (!detailMovie) return null;
@@ -216,6 +230,7 @@ export function App() {
   async function bootstrap() {
     void api.meta().then(setApiMeta).catch(() => setApiMeta(null));
     void api.traktStatus().then((status) => setTraktConnected(status.connected)).catch(() => setTraktConnected(false));
+    void api.tvStats().then(setTvStats).catch(() => setTvStats({ showCount: 0, lastScannedAt: null }));
     void loadCollections();
     try {
       const [loadedSettings, loadedStats] = await Promise.all([api.settings(), api.stats()]);
@@ -249,6 +264,8 @@ export function App() {
 
     const nextServerName = mediaServerLabel(saved.mediaServerType);
     setStats({ movieCount: 0, lastScannedAt: null });
+    setTvStats({ showCount: 0, lastScannedAt: null });
+    void api.tvStats().then(setTvStats).catch(() => setTvStats({ showCount: 0, lastScannedAt: null }));
     setSearchResponse({ query: "", results: [] });
     setSuggestions([]);
     setSuggestionsOpen(false);
@@ -292,14 +309,22 @@ export function App() {
     }
   }
 
-  async function openScanPicker() {
+  async function openScanPicker(kind: "movie" | "tv" = mediaKind) {
     setScanOpen(true);
+    setScanKind(kind);
+    setMessage("");
+    await loadScanLibraries(kind);
+  }
+
+  // Load the movie or TV libraries for the scan picker. Shared by the picker's Movies/TV toggle so
+  // switching kinds re-lists the right libraries (mirrors the movie library picker, kind-aware).
+  async function loadScanLibraries(kind: "movie" | "tv") {
     setLibrariesLoading(true);
     setLibraries([]);
+    setSelectedLibraryKeys([]);
     setScanError("");
-    setMessage("");
     try {
-      const response = await api.mediaLibraries();
+      const response = kind === "tv" ? await api.tvLibraries() : await api.mediaLibraries();
       setLibraries(response.libraries);
       setSelectedLibraryKeys(response.libraries.map((library) => library.key));
     } catch (error) {
@@ -309,20 +334,35 @@ export function App() {
     }
   }
 
+  function changeScanKind(kind: "movie" | "tv") {
+    if (kind === scanKind) return;
+    setScanKind(kind);
+    void loadScanLibraries(kind);
+  }
+
   async function scan(sectionKeys = selectedLibraryKeys) {
     if (!sectionKeys.length) {
-      setMessage(`Choose at least one ${activeServerName} movie library to scan.`);
+      setMessage(`Choose at least one ${activeServerName} ${scanKind === "tv" ? "TV" : "movie"} library to scan.`);
       return;
     }
     setScanning(true);
     setMessage("");
     try {
-      const response = await api.scanMediaServer(sectionKeys);
-      const loadedStats = await api.stats();
-      setStats(loadedStats);
-      // Pick up the serverId/machineId the scan just persisted so the modal can deep-link.
-      void api.settings().then(setSettings).catch(() => undefined);
-      setMessage(`Imported ${response.imported} movies from ${response.sections.join(", ") || activeServerName}.`);
+      if (scanKind === "tv") {
+        const response = await api.scanTv(sectionKeys);
+        setTvStats(await api.tvStats());
+        // The TV scan also persists the serverId/machineId — refresh settings so deep-links work.
+        void api.settings().then(setSettings).catch(() => undefined);
+        setMessage(
+          `Imported ${response.shows.toLocaleString()} shows (${response.episodes.toLocaleString()} episodes) from ${response.sections.join(", ") || activeServerName}.`
+        );
+      } else {
+        const response = await api.scanMediaServer(sectionKeys);
+        setStats(await api.stats());
+        // Pick up the serverId/machineId the scan just persisted so the modal can deep-link.
+        void api.settings().then(setSettings).catch(() => undefined);
+        setMessage(`Imported ${response.imported} movies from ${response.sections.join(", ") || activeServerName}.`);
+      }
       setScanOpen(false);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : `${activeServerName} scan failed.`);
@@ -522,9 +562,10 @@ export function App() {
         </nav>
 
         <section className="stats-panel" aria-label="Library stats">
-          <div className={hasSearchRun ? "stats-strip" : "stats-strip stats-strip-single"}>
+          <div className={hasExtraStats ? "stats-strip" : "stats-strip stats-strip-single"}>
             <Stat label={`${activeServerName} movies`} value={stats.movieCount.toLocaleString()} />
-            {hasSearchRun ? (
+            {tvMode ? <Stat label={`${activeServerName} shows`} value={tvStats.showCount.toLocaleString()} /> : null}
+            {showMovieResultStats ? (
               <>
                 <Stat label="Owned in results" value={ownedCount.toLocaleString()} />
                 <Stat label="Missing in results" value={missingCount.toLocaleString()} />
@@ -532,7 +573,7 @@ export function App() {
             ) : null}
             <div className="last-scan">
               <Database size={18} />
-              {stats.lastScannedAt ? `Last scan ${new Date(stats.lastScannedAt).toLocaleString()}` : "No library scan yet"}
+              {lastScanLabel}
             </div>
           </div>
         </section>
@@ -544,7 +585,7 @@ export function App() {
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Discovery</p>
-              <h2>Search and compare</h2>
+              <h2>{tvMode ? "Search TV shows" : "Search and compare"}</h2>
             </div>
             <div className="view-tools">
               <div className="segmented-control" aria-label="Result view mode">
@@ -573,6 +614,38 @@ export function App() {
             </div>
           </div>
 
+          <div className="segmented-control media-kind-toggle" aria-label="Search movies or TV">
+            <button
+              className={!tvMode ? "selected" : ""}
+              onClick={() => {
+                setMediaKind("movie");
+                setMessage("");
+              }}
+            >
+              <Film size={16} />
+              Movies
+            </button>
+            <button
+              className={tvMode ? "selected" : ""}
+              onClick={() => {
+                setMediaKind("tv");
+                setMessage("");
+              }}
+            >
+              <Tv size={16} />
+              TV
+            </button>
+          </div>
+
+          {tvMode ? (
+            <>
+              {/* Surface app-level feedback (e.g. TV scan results) in TV mode; the movie branch
+                  renders its own copy of `message` below, so movies are unaffected. */}
+              {message ? <p className="status-line">{message}</p> : null}
+              <TvSearchView posterSize={posterSize} serverName={activeServerName} tmdbReady={Boolean(settings.tmdbApiKey)} />
+            </>
+          ) : (
+          <>
           <div ref={searchAreaRef}>
             <form className="search-bar" onSubmit={search}>
               <select
@@ -685,6 +758,8 @@ export function App() {
             onPage={setMoviePage}
             compact
           />
+          </>
+          )}
           </section>
         ) : (
           <CollectionsView
@@ -747,16 +822,28 @@ export function App() {
             <div className="modal-heading">
               <div>
                 <p className="eyebrow">{activeServerName} scan</p>
-                <h2>Choose libraries</h2>
+                <h2>Choose {scanKind === "tv" ? "TV" : "movie"} libraries</h2>
               </div>
               <button className="icon-button" onClick={() => setScanOpen(false)} aria-label="Close library picker">
                 <X size={20} />
               </button>
             </div>
+            <div className="segmented-control media-kind-toggle" aria-label="Scan movies or TV">
+              <button className={scanKind === "movie" ? "selected" : ""} onClick={() => changeScanKind("movie")} disabled={scanning}>
+                <Film size={16} />
+                Movies
+              </button>
+              <button className={scanKind === "tv" ? "selected" : ""} onClick={() => changeScanKind("tv")} disabled={scanning}>
+                <Tv size={16} />
+                TV
+              </button>
+            </div>
             {librariesLoading ? <p className="status-line">Loading {activeServerName} libraries...</p> : null}
             {scanError ? <p className="error-line">{scanError}</p> : null}
             {!librariesLoading && !scanError && !libraries.length ? (
-              <p className="muted-line">No {activeServerName} movie libraries were found. Check your media server settings, then try again.</p>
+              <p className="muted-line">
+                No {activeServerName} {scanKind === "tv" ? "TV" : "movie"} libraries were found. Check your media server settings, then try again.
+              </p>
             ) : null}
             <div className="library-list">
               {libraries.map((library) => (

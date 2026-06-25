@@ -76,30 +76,10 @@ export async function testNzbHydraConnection(baseUrl: string, apiKey: string) {
   return { name: "NZBHydra" };
 }
 
-export async function searchNzbHydra(
-  baseUrl: string,
-  apiKey: string,
-  title: string,
-  year: number | null,
-  qualities: QualityFilter[],
-  sources: SourceFilter[],
-  extraTerms: string,
-  limit: number,
-  offset: number,
-  customQuery?: string
-): Promise<NzbSearchResponse> {
-  const query = customQuery?.trim() || buildNzbHydraQuery(title, year, qualities, sources, extraTerms);
-  const url = hydraApiUrl(baseUrl);
-  url.searchParams.set("apikey", apiKey);
-  url.searchParams.set("t", "search");
-  url.searchParams.set("q", query);
-  url.searchParams.set("limit", String(limit));
-  url.searchParams.set("offset", String(offset));
-
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`NZBHydra returned ${response.status}`);
-
-  const xml = parser.parse(await response.text());
+// Shared Newznab/NZBHydra RSS parser — used by both the movie (t=search) and TV (t=tvsearch) paths
+// so the item mapping lives in one place.
+function parseNzbHydraResponse(xmlText: string, query: string, limit: number, offset: number): NzbSearchResponse {
+  const xml = parser.parse(xmlText);
   const items = asArray(xml.rss?.channel?.item);
   const hydraResponse = xml.rss?.channel?.["newznab:response"];
   const total = hydraResponse?.total ? Number(hydraResponse.total) : null;
@@ -126,4 +106,87 @@ export async function searchNzbHydra(
       publishDate: item.pubDate ?? null
     }))
   };
+}
+
+export async function searchNzbHydra(
+  baseUrl: string,
+  apiKey: string,
+  title: string,
+  year: number | null,
+  qualities: QualityFilter[],
+  sources: SourceFilter[],
+  extraTerms: string,
+  limit: number,
+  offset: number,
+  customQuery?: string
+): Promise<NzbSearchResponse> {
+  const query = customQuery?.trim() || buildNzbHydraQuery(title, year, qualities, sources, extraTerms);
+  const url = hydraApiUrl(baseUrl);
+  url.searchParams.set("apikey", apiKey);
+  url.searchParams.set("t", "search");
+  url.searchParams.set("q", query);
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("offset", String(offset));
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`NZBHydra returned ${response.status}`);
+  return parseNzbHydraResponse(await response.text(), query, limit, offset);
+}
+
+function seasonEpisodeTag(season: number, episode: number | null): string {
+  const seasonTag = `S${String(season).padStart(2, "0")}`;
+  return episode != null ? `${seasonTag}E${String(episode).padStart(2, "0")}` : seasonTag;
+}
+
+// `Show Title S02` (season pack) or `Show Title S02E04` (episode) plus the shared quality/source/
+// extra terms — the human-readable text query / tvsearch q.
+export function buildNzbHydraTvQuery(
+  title: string,
+  season: number,
+  episode: number | null,
+  qualities: QualityFilter[],
+  sources: SourceFilter[],
+  extraTerms: string
+) {
+  return [
+    normalizeReleaseSearchTitle(title),
+    seasonEpisodeTag(season, episode),
+    ...filterTerms(qualities, sources),
+    extraTerms.trim()
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+// TV search via Newznab `t=tvsearch`: structured season (+ ep) params, plus tvdbid for accurate
+// matching when the show has one (falls back to the text q title when it doesn't). The quality/
+// source/extra terms ride along in q exactly like the movie path. Same response parser as movies.
+export async function searchNzbHydraTv(
+  baseUrl: string,
+  apiKey: string,
+  title: string,
+  tvdbId: number | null,
+  season: number,
+  episode: number | null,
+  qualities: QualityFilter[],
+  sources: SourceFilter[],
+  extraTerms: string,
+  limit: number,
+  offset: number,
+  customQuery?: string
+): Promise<NzbSearchResponse> {
+  const query = customQuery?.trim() || buildNzbHydraTvQuery(title, season, episode, qualities, sources, extraTerms);
+  const url = hydraApiUrl(baseUrl);
+  url.searchParams.set("apikey", apiKey);
+  url.searchParams.set("t", "tvsearch");
+  url.searchParams.set("season", String(season));
+  if (episode != null) url.searchParams.set("ep", String(episode));
+  if (tvdbId) url.searchParams.set("tvdbid", String(tvdbId));
+  url.searchParams.set("q", query);
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("offset", String(offset));
+
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`NZBHydra returned ${response.status}`);
+  return parseNzbHydraResponse(await response.text(), query, limit, offset);
 }

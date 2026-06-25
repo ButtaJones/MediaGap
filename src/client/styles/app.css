@@ -1297,9 +1297,25 @@ textarea:focus {
   gap: 10px;
 }
 
-.tv-season-request {
+/* Season-row action group: NZB "Search" + Seerr "Request", pushed to the right of the toggle;
+   wraps below it on narrow screens. The buttons themselves reuse the themed .secondary-button. */
+.tv-season-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   flex: 0 0 auto;
   margin-left: auto;
+}
+
+.tv-season-request,
+.tv-season-search {
+  flex: 0 0 auto;
+}
+
+/* Episode-row "Search" sits at the end of the row; reuses the themed .icon-button. */
+.tv-episode-search {
+  flex: 0 0 auto;
 }
 
 /* Show-level "Request all missing seasons" action above the season list (reuses .details-actions). */

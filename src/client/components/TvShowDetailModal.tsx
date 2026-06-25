@@ -1,8 +1,9 @@
-import { Check, ChevronDown, ChevronRight, Maximize2, Tv, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Download, Maximize2, Tv, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type {
   TvEpisodeSummary,
+  TvNzbTarget,
   TvOwnershipStatus,
   TvSeasonSummary,
   TvShowDetail,
@@ -21,6 +22,8 @@ interface TvShowDetailModalProps {
   error: string;
   serverName: string;
   seerrEnabled?: boolean;
+  nzbEnabled?: boolean;
+  onNzbSearch?: (target: TvNzbTarget) => void;
   onClose: () => void;
 }
 
@@ -65,7 +68,7 @@ function formatVotes(votes: number): string {
   return votes.toLocaleString();
 }
 
-export function TvShowDetailModal({ show, detail, loading, error, serverName, seerrEnabled = false, onClose }: TvShowDetailModalProps) {
+export function TvShowDetailModal({ show, detail, loading, error, serverName, seerrEnabled = false, nzbEnabled = false, onNzbSearch, onClose }: TvShowDetailModalProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [seasonState, setSeasonState] = useState<Record<number, SeasonLoadState>>({});
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -144,6 +147,12 @@ export function TvShowDetailModal({ show, detail, loading, error, serverName, se
   const canRequestSeerr = seerrEnabled && Boolean(detail);
   const notOwnedSeasons = detail ? detail.seasons.filter((season) => season.status !== "complete").map((season) => season.seasonNumber) : [];
   const requestAllSeasons: number[] | "all" = detail?.ownedSeasonCount === 0 ? "all" : notOwnedSeasons;
+
+  // NZBHydra season/episode search (only when NZBHydra is configured and the detail has loaded).
+  const canSearchNzb = nzbEnabled && Boolean(detail) && Boolean(onNzbSearch);
+  function nzbTargetFor(seasonNumber: number, episode: number | null): TvNzbTarget {
+    return { title, year, tvdbId: detail?.tvdbId ?? null, tmdbId: detail!.tmdbId, season: seasonNumber, episode };
+  }
 
   return (
     <div
@@ -275,13 +284,27 @@ export function TvShowDetailModal({ show, detail, loading, error, serverName, se
                           <small className="tv-season-count">{seasonEpisodeText(season)}</small>
                         </span>
                       </button>
-                      {canRequestSeerr && season.status !== "complete" ? (
-                        <SeerrRequestAction
-                          className="tv-season-request"
-                          onRequest={() => api.requestSeerrTv({ tmdbId: detail!.tmdbId, seasons: [season.seasonNumber], title })}
-                          idleLabel="Request"
-                          ariaTitle={`${title} Season ${season.seasonNumber}`}
-                        />
+                      {season.status !== "complete" && (canSearchNzb || canRequestSeerr) ? (
+                        <div className="tv-season-actions">
+                          {canSearchNzb ? (
+                            <button
+                              className="secondary-button tv-season-search"
+                              onClick={() => onNzbSearch?.(nzbTargetFor(season.seasonNumber, null))}
+                              aria-label={`Search NZB releases for ${title} Season ${season.seasonNumber}`}
+                            >
+                              <Download size={16} />
+                              Search
+                            </button>
+                          ) : null}
+                          {canRequestSeerr ? (
+                            <SeerrRequestAction
+                              className="tv-season-request"
+                              onRequest={() => api.requestSeerrTv({ tmdbId: detail!.tmdbId, seasons: [season.seasonNumber], title })}
+                              idleLabel="Request"
+                              ariaTitle={`${title} Season ${season.seasonNumber}`}
+                            />
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
                     <div
@@ -316,6 +339,16 @@ export function TvShowDetailModal({ show, detail, loading, error, serverName, se
                           <span className={episode.status === "owned" ? "inline-badge owned" : "inline-badge missing"}>
                             {episode.status === "owned" ? "Owned" : "Missing"}
                           </span>
+                          {canSearchNzb && episode.status === "missing" ? (
+                            <button
+                              className="icon-button small tv-episode-search"
+                              onClick={() => onNzbSearch?.(nzbTargetFor(season.seasonNumber, episode.episodeNumber))}
+                              title="Search NZB releases"
+                              aria-label={`Search NZB releases for ${title} S${season.seasonNumber}E${episode.episodeNumber}`}
+                            >
+                              <Download size={16} />
+                            </button>
+                          ) : null}
                         </div>
                       ))}
                     </div>

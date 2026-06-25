@@ -703,6 +703,7 @@ export async function getTvShowDetailWithOwnership(apiKey: string, tmdbId: numbe
     backdropPath: details.backdrop_path ? `${BACKDROP_BASE}${details.backdrop_path}` : null,
     missingSeasonNumbers,
     logoPath,
+    tvdbId: details.external_ids?.tvdb_id ?? null,
     overview: details.overview,
     tagline: details.tagline || null,
     tmdbStatus: details.status || null,

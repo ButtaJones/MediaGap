@@ -43,7 +43,7 @@ import {
   startContinueCollectionsRefresh,
   testTmdbConnection
 } from "../integrations/tmdb.js";
-import { searchNzbHydra, testNzbHydraConnection } from "../integrations/nzbhydra.js";
+import { searchNzbHydra, searchNzbHydraTv, testNzbHydraConnection } from "../integrations/nzbhydra.js";
 import { requestSeerrMovie, requestSeerrTv, testSeerrConnection } from "../integrations/seerr.js";
 import { disconnectTrakt, fetchTraktMovieTmdbIds, fetchTraktShowTmdbIds, getTraktStatus, startTraktDeviceFlow } from "../integrations/trakt.js";
 import { appendLog, openLogFolder, readRecentLogs } from "../services/logger.js";
@@ -655,6 +655,63 @@ api.post("/nzbhydra/search", async (req, res, next) => {
   } catch (error) {
     const settings = getSettings();
     appendLog(settings.logPath, settings.loggingEnabled, "error", "NZBHydra search failed", {
+      error: error instanceof Error ? error.message : String(error)
+    });
+    next(error);
+  }
+});
+
+// TV NZB search (t=tvsearch with season/ep + tvdbid), mirroring the movie route. Takes the show
+// identity + season (+ optional episode) + the same quality/source/extra filters and paging.
+api.post("/nzbhydra/search/tv", async (req, res, next) => {
+  try {
+    const settings = getSettings();
+    if (!settings.nzbHydraBaseUrl || !settings.nzbHydraApiKey) {
+      throw new Error("Add NZBHydra URL and API key in Settings first.");
+    }
+
+    const body = z
+      .object({
+        title: z.string().min(1),
+        tvdbId: z.number().int().positive().nullable().default(null),
+        season: z.number().int().min(1),
+        episode: z.number().int().min(1).nullable().default(null),
+        qualities: z.array(z.enum(QUALITY_FILTERS)).default(settings.defaultQualities),
+        sources: z.array(z.enum(SOURCE_FILTERS)).default(settings.defaultSources),
+        extraTerms: z.string().default(""),
+        query: z.string().default(""),
+        limit: z.number().int().min(1).max(100).default(25),
+        offset: z.number().int().min(0).default(0)
+      })
+      .parse(req.body);
+
+    const search = await searchNzbHydraTv(
+      settings.nzbHydraBaseUrl,
+      settings.nzbHydraApiKey,
+      body.title,
+      body.tvdbId,
+      body.season,
+      body.episode,
+      body.qualities,
+      body.sources,
+      body.extraTerms,
+      body.limit,
+      body.offset,
+      body.query
+    );
+
+    appendLog(settings.logPath, settings.loggingEnabled, "info", "NZBHydra TV search completed", {
+      query: search.query,
+      season: body.season,
+      episode: body.episode,
+      tvdbId: body.tvdbId,
+      count: search.results.length,
+      total: search.total
+    });
+    res.json(search);
+  } catch (error) {
+    const settings = getSettings();
+    appendLog(settings.logPath, settings.loggingEnabled, "error", "NZBHydra TV search failed", {
       error: error instanceof Error ? error.message : String(error)
     });
     next(error);

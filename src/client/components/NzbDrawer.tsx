@@ -1,11 +1,13 @@
 import { Check, Download, Loader2, Send, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { QUALITY_FILTERS, SOURCE_FILTERS, type MovieResult, type NzbResult } from "../../shared/types";
+import { QUALITY_FILTERS, SOURCE_FILTERS, type MovieResult, type NzbResult, type NzbSearchResponse, type TvNzbTarget } from "../../shared/types";
 import { api } from "../lib/api";
 import { CategorySelect } from "./CategorySelect";
 
 interface NzbDrawerProps {
   movie: MovieResult | null;
+  /** When set (and movie null), the drawer runs a TV season/episode search instead. */
+  tvTarget?: TvNzbTarget | null;
   defaultQualities: string[];
   defaultSources: string[];
   defaultCategory: string;
@@ -16,8 +18,25 @@ interface NzbDrawerProps {
   onClose: () => void;
 }
 
+// Normalized search subject (movie or TV) so the drawer body stays one code path.
+interface DrawerSubject {
+  title: string;
+  subtitle: string;
+  zipTitle: string;
+  buildQuery: (qualities: string[], sources: string[], extraTerms: string) => string;
+  runSearch: (
+    qualities: string[],
+    sources: string[],
+    extraTerms: string,
+    query: string,
+    limit: number,
+    offset: number
+  ) => Promise<NzbSearchResponse>;
+}
+
 export function NzbDrawer({
   movie,
+  tvTarget = null,
   defaultQualities,
   defaultSources,
   defaultCategory,
@@ -29,6 +48,28 @@ export function NzbDrawer({
 }: NzbDrawerProps) {
   const effectiveDefaultQualities = defaultQualities;
   const effectiveDefaultSources = defaultSources;
+  const subject = useMemo<DrawerSubject | null>(() => {
+    if (tvTarget) {
+      const tag = tvSeasonEpisodeTag(tvTarget.season, tvTarget.episode);
+      return {
+        title: tvTarget.title,
+        subtitle: tvTarget.episode != null ? `Season ${tvTarget.season} · Episode ${tvTarget.episode}` : `Season ${tvTarget.season}`,
+        zipTitle: `${tvTarget.title} ${tag}`,
+        buildQuery: (q, s, extra) => buildTvEditableQuery(tvTarget, q, s, extra),
+        runSearch: (q, s, extra, query, lim, off) => api.searchNzbTv(tvTarget, q, s, extra, query, lim, off)
+      };
+    }
+    if (movie) {
+      return {
+        title: movie.title,
+        subtitle: movie.year != null ? String(movie.year) : "Unknown year",
+        zipTitle: movie.title,
+        buildQuery: (q, s, extra) => buildEditableQuery(movie, q, s, extra),
+        runSearch: (q, s, extra, query, lim, off) => api.searchNzb(movie, q, s, extra, query, lim, off)
+      };
+    }
+    return null;
+  }, [movie, tvTarget]);
   const [qualities, setQualities] = useState<string[]>(effectiveDefaultQualities);
   const [sources, setSources] = useState<string[]>(effectiveDefaultSources);
   const [results, setResults] = useState<NzbResult[]>([]);
@@ -50,7 +91,7 @@ export function NzbDrawer({
     setQualities(effectiveDefaultQualities);
     setSources(effectiveDefaultSources);
     setResults([]);
-    setQuery(movie ? buildEditableQuery(movie, effectiveDefaultQualities, effectiveDefaultSources, "") : "");
+    setQuery(subject ? subject.buildQuery(effectiveDefaultQualities, effectiveDefaultSources, "") : "");
     setExtraTerms("");
     setOffset(0);
     setTotal(null);
@@ -59,7 +100,7 @@ export function NzbDrawer({
     setNotice("");
     setSelectedLinks([]);
     setSendState({});
-  }, [movie, defaultQualities, defaultSources, defaultCategory]);
+  }, [subject, defaultQualities, defaultSources, defaultCategory]);
 
   const sortedResults = useMemo(() => {
     const sorted = [...results].sort((a, b) => {
@@ -75,11 +116,11 @@ export function NzbDrawer({
   const pageStart = results.length ? offset + 1 : 0;
   const pageEnd = offset + results.length;
 
-  if (!movie) return null;
+  if (!subject) return null;
 
   function rebuildQuery(nextQualities = qualities, nextSources = sources, nextExtraTerms = extraTerms) {
-    if (!movie) return;
-    setQuery(buildEditableQuery(movie, nextQualities, nextSources, nextExtraTerms));
+    if (!subject) return;
+    setQuery(subject.buildQuery(nextQualities, nextSources, nextExtraTerms));
   }
 
   function toggleQuality(value: string) {
@@ -95,12 +136,12 @@ export function NzbDrawer({
   }
 
   async function search(nextOffset = offset) {
-    if (!movie) return;
+    if (!subject) return;
     setLoading(true);
     setError("");
     setNotice("");
     try {
-      const response = await api.searchNzb(movie, qualities, sources, extraTerms, query, limit, nextOffset);
+      const response = await subject.runSearch(qualities, sources, extraTerms, query, limit, nextOffset);
       setResults(response.results);
       setSelectedLinks([]);
       setSendState({});
@@ -155,14 +196,14 @@ export function NzbDrawer({
 
   async function downloadSelected() {
     const selected = sortedResults.filter((result) => selectedLinks.includes(result.link));
-    if (!selected.length || !movie) {
+    if (!selected.length || !subject) {
       setError("Select at least one release first.");
       return;
     }
     setError("");
     setNotice("");
     try {
-      const response = await api.downloadNzbZip(movie.title, selected);
+      const response = await api.downloadNzbZip(subject.zipTitle, selected);
       const url = URL.createObjectURL(response.blob);
       const anchor = document.createElement("a");
       anchor.href = url;
@@ -195,8 +236,8 @@ export function NzbDrawer({
       <div className="drawer-header">
         <div>
           <p className="eyebrow">NZBHydra search</p>
-          <h2>{movie.title}</h2>
-          <p>{movie.year ?? "Unknown year"}</p>
+          <h2>{subject.title}</h2>
+          <p>{subject.subtitle}</p>
         </div>
         <button className="icon-button" onClick={onClose} aria-label="Close NZBHydra search">
           <X size={20} />
@@ -451,4 +492,22 @@ function normalizeReleaseTitle(title: string) {
     .replace(/[^a-zA-Z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+function tvSeasonEpisodeTag(season: number, episode: number | null) {
+  const seasonTag = `S${String(season).padStart(2, "0")}`;
+  return episode != null ? `${seasonTag}E${String(episode).padStart(2, "0")}` : seasonTag;
+}
+
+// `Show Title S02 1080p WEB-DL` (season pack) or `Show Title S02E04 ...` (episode). Mirrors the
+// movie buildEditableQuery; the season/ep params are sent structurally alongside this text query.
+function buildTvEditableQuery(target: TvNzbTarget, qualities: string[], sources: string[], extraTerms: string) {
+  return [
+    normalizeReleaseTitle(target.title),
+    tvSeasonEpisodeTag(target.season, target.episode),
+    ...[...qualities, ...sources].map((term) => term.replace("4K", "2160p")),
+    extraTerms.trim()
+  ]
+    .filter(Boolean)
+    .join(" ");
 }

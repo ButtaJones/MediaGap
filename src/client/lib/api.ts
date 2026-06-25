@@ -20,6 +20,7 @@ import type {
   SearchSuggestion,
   TraktStatus,
   TvScanResponse,
+  TvNzbTarget,
   TvSearchResponse,
   TvSeasonEpisodesResponse,
   TvShowDetail,
@@ -115,6 +116,30 @@ export const api = {
     request<NzbSearchResponse>("/nzbhydra/search", {
       method: "POST",
       body: JSON.stringify({ title: movie.title, year: movie.year, qualities, sources, extraTerms, query, limit, offset })
+    }),
+  searchNzbTv: (
+    target: TvNzbTarget,
+    qualities: string[],
+    sources: string[],
+    extraTerms: string,
+    query: string,
+    limit: number,
+    offset: number
+  ) =>
+    request<NzbSearchResponse>("/nzbhydra/search/tv", {
+      method: "POST",
+      body: JSON.stringify({
+        title: target.title,
+        tvdbId: target.tvdbId,
+        season: target.season,
+        episode: target.episode,
+        qualities,
+        sources,
+        extraTerms,
+        query,
+        limit,
+        offset
+      })
     }),
   movieDetails: (tmdbId: number) => request<MovieDetails>(`/movies/${tmdbId}/details`),
   requestSeerr: (movie: Pick<MovieResult, "tmdbId" | "title">) =>

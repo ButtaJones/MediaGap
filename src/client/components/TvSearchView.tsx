@@ -1,7 +1,7 @@
 import { Search, Tv } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TRAKT_SOURCE_LABELS } from "../../shared/types";
-import type { TraktSource, TvShowDetail, TvShowResult, TvSuggestion } from "../../shared/types";
+import type { TraktSource, TvNzbTarget, TvShowDetail, TvShowResult, TvSuggestion } from "../../shared/types";
 import { api } from "../lib/api";
 import { ResultControls } from "./ResultControls";
 import { TvShowGrid } from "./TvShowGrid";
@@ -13,6 +13,8 @@ interface TvSearchViewProps {
   serverName: string;
   tmdbReady: boolean;
   seerrEnabled: boolean;
+  nzbEnabled: boolean;
+  onNzbSearch: (target: TvNzbTarget) => void;
   traktConnected: boolean;
 }
 
@@ -25,7 +27,7 @@ function isTraktSource(source: TvSource): source is TraktSource {
 // Dedicated TV search surface: a show-title search with as-you-type suggestions, Trakt watchlist/
 // watched as TV sources, an ownership-aware poster grid, and the drill-down detail modal (with Seerr
 // season requests). Kept separate from the movie search but mirrors its source select + suggestions.
-export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seerrEnabled, traktConnected }: TvSearchViewProps) {
+export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seerrEnabled, nzbEnabled, onNzbSearch, traktConnected }: TvSearchViewProps) {
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState("");
   const [source, setSource] = useState<TvSource>("show");
@@ -303,6 +305,13 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
         error={detailError}
         serverName={serverName}
         seerrEnabled={seerrEnabled}
+        nzbEnabled={nzbEnabled}
+        onNzbSearch={(target) => {
+          // Close the detail modal first so the NZB drawer isn't stacked behind it (mirrors the
+          // movie detail modal, which closes itself when opening the NZB drawer).
+          closeDetail();
+          onNzbSearch(target);
+        }}
         onClose={closeDetail}
       />
     </>

@@ -1,7 +1,7 @@
 import { Activity, Database, Film, Grid2X2, List, Menu, Moon, RefreshCw, Search, Settings, Sun, Tv, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { THEME_MODES, TRAKT_SOURCE_LABELS, mediaServerLabel, themeLabel } from "../shared/types";
-import type { AppMeta, AppSettings, MediaServerLibrary, MovieCollectionSummary, MovieDetails, MovieResult, SearchResponse, SearchSuggestion, ThemeMode, TraktSource } from "../shared/types";
+import type { AppMeta, AppSettings, MediaServerLibrary, MovieCollectionSummary, MovieDetails, MovieResult, SearchResponse, SearchSuggestion, ThemeMode, TraktSource, TvNzbTarget } from "../shared/types";
 import { DownloadStatusBar } from "./components/DownloadStatusBar";
 import { DownloadMonitor } from "./components/DownloadMonitor";
 import { MovieGrid } from "./components/MovieGrid";
@@ -123,6 +123,7 @@ export function App() {
   const [scanning, setScanning] = useState(false);
   const [message, setMessage] = useState("");
   const [selectedMovie, setSelectedMovie] = useState<MovieResult | null>(null);
+  const [selectedTvNzb, setSelectedTvNzb] = useState<TvNzbTarget | null>(null);
   const [detailMovie, setDetailMovie] = useState<MovieResult | null>(null);
   const [movieDetails, setMovieDetails] = useState<MovieDetails | null>(null);
   const [trailerOpen, setTrailerOpen] = useState(false);
@@ -163,6 +164,7 @@ export function App() {
       ? `Last scan ${new Date(stats.lastScannedAt).toLocaleString()}`
       : "No library scan yet";
   const seerrEnabled = Boolean(settings.seerrBaseUrl && settings.seerrApiKey);
+  const nzbEnabled = Boolean(settings.nzbHydraBaseUrl && settings.nzbHydraApiKey);
   const detailCollection = useMemo(() => {
     if (!detailMovie) return null;
     return collections.find((collection) => collection.movies.some((movie) => movie.tmdbId === detailMovie.tmdbId)) ?? null;
@@ -488,7 +490,13 @@ export function App() {
   }
 
   function openNzbSearch(movie: MovieResult) {
+    setSelectedTvNzb(null);
     setSelectedMovie(movie);
+  }
+
+  function openTvNzbSearch(target: TvNzbTarget) {
+    setSelectedMovie(null);
+    setSelectedTvNzb(target);
   }
 
   function closeMovieDetails() {
@@ -689,6 +697,8 @@ export function App() {
                 serverName={activeServerName}
                 tmdbReady={Boolean(settings.tmdbApiKey)}
                 seerrEnabled={seerrEnabled}
+                nzbEnabled={nzbEnabled}
+                onNzbSearch={openTvNzbSearch}
                 traktConnected={traktConnected}
               />
             </>
@@ -978,6 +988,7 @@ export function App() {
 
       <NzbDrawer
         movie={selectedMovie}
+        tvTarget={selectedTvNzb}
         defaultQualities={settings.defaultQualities}
         defaultSources={settings.defaultSources}
         defaultCategory={settings.downloaderDefaultCategory}
@@ -985,7 +996,10 @@ export function App() {
         downloaderType={settings.downloaderType}
         downloaderBaseUrl={settings.downloaderBaseUrl}
         downloaderApiKey={settings.downloaderApiKey}
-        onClose={() => setSelectedMovie(null)}
+        onClose={() => {
+          setSelectedMovie(null);
+          setSelectedTvNzb(null);
+        }}
       />
       <footer className="app-footer" aria-label="App version">
         <span>Client {formatMeta(CLIENT_META)}</span>

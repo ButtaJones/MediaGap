@@ -281,6 +281,8 @@ export interface TvShowDetail extends TvShowResult {
   backdropPath: string | null;
   /** Clearlogo title image (parity with movies); null falls back to the text title. */
   logoPath: string | null;
+  /** TheTVDB id (from TMDb external_ids) — used for NZBHydra tvsearch when available. */
+  tvdbId: number | null;
   tagline: string | null;
   /** TMDb production status, e.g. "Returning Series" / "Ended", when available. */
   tmdbStatus: string | null;
@@ -298,6 +300,18 @@ export interface TvShowDetail extends TvShowResult {
 export interface TvSearchResponse {
   query: string;
   results: TvShowResult[];
+}
+
+// Identity for an NZBHydra TV search launched from the show-detail modal: a whole season (episode
+// null) or a single episode. Drives the NzbDrawer's TV query + the t=tvsearch params.
+export interface TvNzbTarget {
+  title: string;
+  year: number | null;
+  tvdbId: number | null;
+  tmdbId: number;
+  season: number;
+  /** null = whole-season pack; a number = a single episode. */
+  episode: number | null;
 }
 
 // Lightweight TV search-as-you-type suggestion (no ownership rollup, so the dropdown stays fast).

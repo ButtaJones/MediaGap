@@ -25,6 +25,7 @@ import type {
   CollectionsRefreshStatus,
   CollectionsResponse,
   MediaServerShow,
+  MovieCastMember,
   MovieDetails,
   MovieResult,
   PersonHeader,
@@ -649,9 +650,10 @@ export async function getTvShowDetailWithOwnership(apiKey: string, tmdbId: numbe
   const owned = ownedSeasonMap(tmdbId);
   const imdbId = details.external_ids?.imdb_id ?? null;
 
-  // Kick off the clearlogo + IMDb rating lookups in parallel with the per-season fetches below.
-  // Both degrade gracefully (null) so a failure never breaks the detail (parity with movies).
+  // Kick off the clearlogo + IMDb rating + cast lookups in parallel with the per-season fetches
+  // below. All degrade gracefully so a failure never breaks the detail (parity with movies).
   const logoPromise = getTvLogo(apiKey, tmdbId).catch(() => null);
+  const castPromise = getTvCast(apiKey, tmdbId).catch(() => [] as MovieCastMember[]);
   const imdbRatingPromise = imdbId
     ? getImdbRatings()
         .then((ratings) => ratings.get(imdbId) ?? null)
@@ -692,7 +694,7 @@ export async function getTvShowDetailWithOwnership(apiKey: string, tmdbId: numbe
   // missing seasons" additionally covers precise partial seasons via detail.seasons).
   const missingSeasonNumbers = seasons.filter((season) => season.status === "missing").map((season) => season.seasonNumber);
 
-  const [logoPath, imdbRating] = await Promise.all([logoPromise, imdbRatingPromise]);
+  const [logoPath, imdbRating, cast] = await Promise.all([logoPromise, imdbRatingPromise, castPromise]);
   const primaryNetwork = details.networks?.[0] ?? null;
 
   return {
@@ -702,6 +704,7 @@ export async function getTvShowDetailWithOwnership(apiKey: string, tmdbId: numbe
     posterPath: details.poster_path ? `${IMAGE_BASE}${details.poster_path}` : null,
     backdropPath: details.backdrop_path ? `${BACKDROP_BASE}${details.backdrop_path}` : null,
     missingSeasonNumbers,
+    cast,
     logoPath,
     tvdbId: details.external_ids?.tvdb_id ?? null,
     overview: details.overview,
@@ -825,6 +828,46 @@ export async function getTvShowsByTmdbIds(apiKey: string, tmdbIds: number[]): Pr
   return results;
 }
 
+// TV person search — the TV equivalent of searchPersonCredits. Resolve the person, fetch their
+// /tv_credits (cast + crew), dedupe shows to once each, then run them through the SAME ownership
+// rollup so the results render exactly like a TV title search. Capped so the per-show lookups stay
+// bounded; sorted newest-first.
+export async function searchTvPersonCredits(
+  apiKey: string,
+  query: string
+): Promise<{ results: TvShowResult[]; person: PersonHeader | null }> {
+  const people = await tmdbFetch<{ results: TmdbPerson[] }>(apiKey, "/search/person", { query, include_adult: "false" });
+  const person = people.results[0];
+  if (!person) return { results: [], person: null };
+
+  const cacheKey = `tmdb:tv-person:${query}`;
+  let showIds = cacheGet<number[]>(cacheKey);
+  if (!showIds) {
+    const credits = await tmdbFetch<{ cast?: TmdbMovie[]; crew?: TmdbMovie[] }>(apiKey, `/person/${person.id}/tv_credits`);
+    const ids = new Set<number>();
+    for (const show of [...(credits.cast ?? []), ...(credits.crew ?? [])]) {
+      if (show.id) ids.add(show.id);
+    }
+    showIds = [...ids];
+    cacheSet(cacheKey, showIds);
+  }
+
+  const meta = await fetchPersonMeta(apiKey, person.id);
+  const header: PersonHeader = {
+    id: person.id,
+    name: person.name,
+    profilePath: person.profile_path ? `${IMAGE_BASE}${person.profile_path}` : null,
+    birthday: meta.birthday,
+    deathday: meta.deathday,
+    placeOfBirth: meta.placeOfBirth,
+    knownFor: person.known_for?.map((work) => work.title ?? work.name).filter(Boolean).slice(0, 2).join(", ") || null
+  };
+
+  const results = await getTvShowsByTmdbIds(apiKey, showIds.slice(0, 50));
+  results.sort((a, b) => (b.year ?? 0) - (a.year ?? 0) || a.title.localeCompare(b.title));
+  return { results, person: header };
+}
+
 export async function getMovieDetails(apiKey: string, tmdbId: number): Promise<MovieDetails> {
   const raw = await getMovieDetailsRaw(apiKey, tmdbId);
 
@@ -899,6 +942,53 @@ async function getTvLogo(apiKey: string, tmdbId: number): Promise<string | null>
   const logoPath = logo?.file_path ? `${LOGO_BASE}${logo.file_path}` : null;
   cacheSet(key, { logoPath });
   return logoPath;
+}
+
+interface TmdbTvCastMember {
+  id: number;
+  name: string;
+  profile_path?: string | null;
+  order?: number;
+  /** aggregate_credits groups a person's roles across seasons; /credits uses a flat `character`. */
+  roles?: Array<{ character?: string }>;
+  character?: string;
+}
+
+// TV cast (parity with the movie modal's cast). Prefer /aggregate_credits (cast aggregated across
+// seasons), falling back to /credits. Cached and capped, mapped to the shared MovieCastMember shape.
+async function getTvCast(apiKey: string, tmdbId: number): Promise<MovieCastMember[]> {
+  const key = `tmdb:tv-cast:${tmdbId}`;
+  const cached = cacheGet<MovieCastMember[]>(key);
+  if (cached) return cached;
+
+  let raw: TmdbTvCastMember[] = [];
+  try {
+    const aggregate = await tmdbFetch<{ cast?: TmdbTvCastMember[] }>(apiKey, `/tv/${tmdbId}/aggregate_credits`);
+    raw = aggregate.cast ?? [];
+  } catch {
+    raw = [];
+  }
+  if (!raw.length) {
+    try {
+      const credits = await tmdbFetch<{ cast?: TmdbTvCastMember[] }>(apiKey, `/tv/${tmdbId}/credits`);
+      raw = credits.cast ?? [];
+    } catch {
+      raw = [];
+    }
+  }
+
+  const cast: MovieCastMember[] = raw
+    .slice()
+    .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
+    .slice(0, 18)
+    .map((member) => ({
+      id: member.id,
+      name: member.name,
+      character: member.roles?.[0]?.character || member.character || null,
+      profilePath: member.profile_path ? `${IMAGE_BASE}${member.profile_path}` : null
+    }));
+  cacheSet(key, cast);
+  return cast;
 }
 
 function pickTmdbLogo(logos: TmdbImage[]): TmdbImage | null {

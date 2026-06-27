@@ -294,12 +294,16 @@ export interface TvShowDetail extends TvShowResult {
   /** Primary TMDb network name (e.g. HBO, Netflix), null when unavailable. */
   network: string | null;
   networkLogoPath: string | null;
+  /** Aggregated cast (parity with the movie modal); reuses the shared cast-member shape. */
+  cast: MovieCastMember[];
   seasons: TvSeasonSummary[];
 }
 
 export interface TvSearchResponse {
   query: string;
   results: TvShowResult[];
+  /** Present only for a TV person search — drives the PersonResultHeader above the grid. */
+  person?: PersonHeader | null;
 }
 
 // Identity for an NZBHydra TV search launched from the show-detail modal: a whole season (episode

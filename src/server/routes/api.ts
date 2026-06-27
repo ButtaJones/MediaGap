@@ -38,6 +38,7 @@ import {
   searchMovies,
   searchPersonCredits,
   searchSuggestions,
+  searchTvPersonCredits,
   searchTvShows,
   searchTvSuggestions,
   startContinueCollectionsRefresh,
@@ -375,6 +376,19 @@ api.get("/tv/search", async (req, res, next) => {
     const query = z.string().min(1).parse(req.query.q);
     const results = await searchTvShows(settings.tmdbApiKey, query);
     res.json({ query, results });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// TV person search: an actor's/creator's TV work, run through the same ownership rollup. Returns a
+// PersonHeader alongside the results (mirrors the movie person search).
+api.get("/tv/person", async (req, res, next) => {
+  try {
+    const settings = requireSettings();
+    const query = z.string().min(1).parse(req.query.q);
+    const { results, person } = await searchTvPersonCredits(settings.tmdbApiKey, query);
+    res.json({ query, results, person });
   } catch (error) {
     next(error);
   }

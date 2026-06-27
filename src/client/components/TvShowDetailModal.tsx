@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, Download, Maximize2, Tv, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Download, Maximize2, Tv, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type {
@@ -24,6 +24,7 @@ interface TvShowDetailModalProps {
   seerrEnabled?: boolean;
   nzbEnabled?: boolean;
   onNzbSearch?: (target: TvNzbTarget) => void;
+  onSearchPerson?: (name: string) => void;
   onClose: () => void;
 }
 
@@ -68,7 +69,7 @@ function formatVotes(votes: number): string {
   return votes.toLocaleString();
 }
 
-export function TvShowDetailModal({ show, detail, loading, error, serverName, seerrEnabled = false, nzbEnabled = false, onNzbSearch, onClose }: TvShowDetailModalProps) {
+export function TvShowDetailModal({ show, detail, loading, error, serverName, seerrEnabled = false, nzbEnabled = false, onNzbSearch, onSearchPerson, onClose }: TvShowDetailModalProps) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [seasonState, setSeasonState] = useState<Record<number, SeasonLoadState>>({});
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -357,6 +358,29 @@ export function TvShowDetailModal({ show, detail, loading, error, serverName, se
               );
             })}
           </div>
+
+          <section className="cast-section">
+            <h3>Cast</h3>
+            {detail?.cast.length ? (
+              <div className="cast-grid">
+                {detail.cast.map((member) => (
+                  <button
+                    type="button"
+                    className="cast-card clickable"
+                    key={`${member.id}-${member.character ?? ""}`}
+                    onClick={() => onSearchPerson?.(member.name)}
+                    aria-label={`Search ${member.name}`}
+                  >
+                    <div className="cast-photo">{member.profilePath ? <img src={member.profilePath} alt="" /> : <UserRound size={24} />}</div>
+                    <strong>{member.name}</strong>
+                    {member.character ? <span>{member.character}</span> : null}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="muted-line">{loading ? "Cast will appear here." : "No cast list available."}</p>
+            )}
+          </section>
         </div>
       </div>
       {lightboxOpen ? (

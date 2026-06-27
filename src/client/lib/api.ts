@@ -83,6 +83,7 @@ export const api = {
   search: (query: string, type: "person" | "movie" | "studio") =>
     request<SearchResponse>(`/search?q=${encodeURIComponent(query)}&type=${type}`),
   searchTv: (query: string) => request<TvSearchResponse>(`/tv/search?q=${encodeURIComponent(query)}`),
+  searchTvPerson: (query: string) => request<TvSearchResponse>(`/tv/person?q=${encodeURIComponent(query)}`),
   tvSuggest: (query: string) => request<TvSuggestResponse>(`/tv/suggest?q=${encodeURIComponent(query)}`),
   tvShowDetail: (tmdbId: number) => request<TvShowDetail>(`/tv/${tmdbId}/detail`),
   tvSeasonEpisodes: (tmdbId: number, seasonNumber: number) =>

@@ -1,8 +1,9 @@
 import { Check, Download, Loader2, Send, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { QUALITY_FILTERS, SOURCE_FILTERS, type MovieResult, type NzbResult, type NzbSearchResponse, type TvNzbTarget } from "../../shared/types";
 import { api } from "../lib/api";
 import { CategorySelect } from "./CategorySelect";
+import { ScrollToTopButton } from "./ScrollToTopButton";
 
 interface NzbDrawerProps {
   movie: MovieResult | null;
@@ -86,6 +87,8 @@ export function NzbDrawer({
   const [notice, setNotice] = useState("");
   const [selectedLinks, setSelectedLinks] = useState<string[]>([]);
   const [sendState, setSendState] = useState<Record<string, "sending" | "sent">>({});
+  // The drawer's own scroll container — paging scrolls it to top, and the scroll-to-top button watches it.
+  const drawerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setQualities(effectiveDefaultQualities);
@@ -149,6 +152,8 @@ export function NzbDrawer({
       setOffset(response.offset);
       setLimit(response.limit);
       setTotal(response.total);
+      // Jump back to the top of the drawer so the new page of releases is in view.
+      drawerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
     } catch (searchError) {
       setError(searchError instanceof Error ? searchError.message : "NZBHydra search failed.");
     } finally {
@@ -232,7 +237,7 @@ export function NzbDrawer({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <aside className="drawer">
+      <aside className="drawer" ref={drawerRef}>
       <div className="drawer-header">
         <div>
           <p className="eyebrow">NZBHydra search</p>
@@ -424,6 +429,7 @@ export function NzbDrawer({
         onNext={() => search(offset + limit)}
       />
       </aside>
+      <ScrollToTopButton scrollContainerRef={drawerRef} className="scroll-top-button--drawer" />
     </div>
   );
 }

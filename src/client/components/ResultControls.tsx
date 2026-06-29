@@ -14,6 +14,9 @@ interface ResultControlsProps<T extends string = string> {
   perPageLabel: string;
   perPageOptions?: number[];
   compact?: boolean;
+  /** When set, changing page scrolls this element to the top of the viewport (so a Next/Prev from
+   *  the bottom pager jumps the user back up to the fresh results). */
+  scrollTargetRef?: React.RefObject<HTMLElement | null>;
   onPerPage: (value: number) => void;
   onPage: (value: number) => void;
   // Optional sort/order section — rendered only when sortOptions + onSort are provided (movies use
@@ -40,6 +43,7 @@ export function ResultControls<T extends string = string>({
   perPageLabel,
   perPageOptions = DEFAULT_PER_PAGE,
   compact = false,
+  scrollTargetRef,
   onPerPage,
   onPage,
   sort,
@@ -50,6 +54,16 @@ export function ResultControls<T extends string = string>({
 }: ResultControlsProps<T>) {
   if (!total) return null;
   const showSort = Boolean(sortOptions && onSort);
+
+  function goToPage(next: number) {
+    onPage(next);
+    if (!scrollTargetRef) return;
+    // Defer until the new page has rendered: a shorter last page shrinks the document, which would
+    // otherwise clamp (and cancel) a smooth scroll started against the taller previous page.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => scrollTargetRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }))
+    );
+  }
 
   return (
     <div className={compact ? "result-controls compact" : "result-controls"}>
@@ -90,13 +104,13 @@ export function ResultControls<T extends string = string>({
         ) : null}
       </div>
       <div className="result-page-actions">
-        <button className="secondary-button" onClick={() => onPage(Math.max(0, page - 1))} disabled={page === 0}>
+        <button className="secondary-button" onClick={() => goToPage(Math.max(0, page - 1))} disabled={page === 0}>
           Previous
         </button>
         <span>
           Page {page + 1} of {pageCount}
         </span>
-        <button className="secondary-button" onClick={() => onPage(Math.min(pageCount - 1, page + 1))} disabled={page >= pageCount - 1}>
+        <button className="secondary-button" onClick={() => goToPage(Math.min(pageCount - 1, page + 1))} disabled={page >= pageCount - 1}>
           Next
         </button>
       </div>

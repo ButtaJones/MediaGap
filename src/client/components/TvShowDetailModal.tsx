@@ -238,6 +238,12 @@ export function TvShowDetailModal({ show, detail, loading, error, serverName, se
         </div>
 
         <div className="tv-detail-body">
+          {detail?.overview ?? show.overview ? (
+            <p className="details-overview">{detail?.overview ?? show.overview}</p>
+          ) : !loading && detail ? (
+            <p className="muted-line">No overview available.</p>
+          ) : null}
+
           {canRequestSeerr && notOwnedSeasons.length ? (
             <div className="details-actions tv-detail-actions">
               <SeerrRequestAction

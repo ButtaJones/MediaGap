@@ -2555,6 +2555,32 @@ html[data-theme="jellyfin"] .history-select {
   white-space: nowrap;
 }
 
+/* Zero-height scroll target above the results; paging scrolls it to the top of the viewport. */
+.results-anchor {
+  height: 0;
+  scroll-margin-top: 14px;
+}
+
+/* Floating scroll-to-top FAB. Surface/border/color come from .icon-button (already themed for all
+   five themes), so this only adds the floating position + round shape + a themed accent ring. */
+.scroll-top-button {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 8;
+  width: 44px;
+  height: 44px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 999px;
+  box-shadow: 0 8px 22px rgba(16, 31, 58, 0.3);
+}
+
+/* In the NZB drawer: sit above the drawer + its bottom pager, below the detail modals. */
+.scroll-top-button--drawer {
+  bottom: 76px;
+  z-index: 16;
+}
+
 html[data-theme="dark"],
 html[data-theme="plex"] {
   color: #e6edf7;

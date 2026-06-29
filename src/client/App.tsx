@@ -6,6 +6,7 @@ import { DownloadStatusBar } from "./components/DownloadStatusBar";
 import { DownloadMonitor } from "./components/DownloadMonitor";
 import { MovieGrid } from "./components/MovieGrid";
 import { ResultControls } from "./components/ResultControls";
+import { ScrollToTopButton } from "./components/ScrollToTopButton";
 import { TvSearchView } from "./components/TvSearchView";
 import { CollectionsView } from "./components/CollectionsView";
 import { MovieDetailsModal } from "./components/MovieDetailsModal";
@@ -14,6 +15,7 @@ import { TrailerModal } from "./components/TrailerModal";
 import { NzbDrawer } from "./components/NzbDrawer";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { api } from "./lib/api";
+import { buildSearchString, parseUrlState, type TvSourceKey, type UrlState } from "./lib/urlState";
 
 const EMPTY_SETTINGS: AppSettings = {
   mediaServerType: "plex",
@@ -106,15 +108,24 @@ interface TvStats {
 const EMPTY_TV_STATS: TvStats = { showCount: 0, seasonCount: 0, episodeCount: 0, lastScannedAt: null };
 
 export function App() {
+  // The URL is the source of truth for navigable search inputs. Parse it once for the initial state
+  // (results are re-fetched on mount); `kind` falls back to the saved media-kind pref when absent.
+  const [bootUrl] = useState<UrlState>(() => parseUrlState(window.location.search, readStoredMediaKind()));
   const [settings, setSettings] = useState<AppSettings>(EMPTY_SETTINGS);
   const [apiMeta, setApiMeta] = useState<AppMeta | null>(null);
-  const [activeView, setActiveView] = useState<"search" | "collections">("search");
-  const [mediaKind, setMediaKind] = useState<"movie" | "tv">(readStoredMediaKind);
+  const [activeView, setActiveView] = useState<"search" | "collections">(bootUrl.view);
+  const [mediaKind, setMediaKind] = useState<"movie" | "tv">(bootUrl.kind);
   const [stats, setStats] = useState<{ movieCount: number; lastScannedAt: string | null }>({ movieCount: 0, lastScannedAt: null });
   const [tvStats, setTvStats] = useState<TvStats>(EMPTY_TV_STATS);
-  const [query, setQuery] = useState("");
-  const [type, setType] = useState<SearchType>("person");
+  const [query, setQuery] = useState(bootUrl.q);
+  const [type, setType] = useState<SearchType>(bootUrl.type);
   const [traktConnected, setTraktConnected] = useState(false);
+  const [traktLoaded, setTraktLoaded] = useState(false);
+  // TV navigable state lives here (lifted from TvSearchView) so it round-trips through the URL.
+  const [tvSource, setTvSource] = useState<TvSourceKey>(bootUrl.tvSource);
+  const [tvSubmittedQuery, setTvSubmittedQuery] = useState(bootUrl.tvQ);
+  const [tvPage, setTvPage] = useState(bootUrl.tvPage);
+  const [tvPerPage, setTvPerPage] = useState(bootUrl.tvPerPage);
   const [searchResponse, setSearchResponse] = useState<SearchResponse>({ query: "", results: [] });
   const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
@@ -124,13 +135,15 @@ export function App() {
   const [message, setMessage] = useState("");
   const [selectedMovie, setSelectedMovie] = useState<MovieResult | null>(null);
   const [selectedTvNzb, setSelectedTvNzb] = useState<TvNzbTarget | null>(null);
+  // Anchor at the top of the movie results so paging the bottom pager jumps back up to them.
+  const moviesResultsRef = useRef<HTMLDivElement | null>(null);
   const [detailMovie, setDetailMovie] = useState<MovieResult | null>(null);
   const [movieDetails, setMovieDetails] = useState<MovieDetails | null>(null);
   const [trailerOpen, setTrailerOpen] = useState(false);
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState("");
   const [collections, setCollections] = useState<MovieCollectionSummary[]>([]);
-  const [focusCollectionId, setFocusCollectionId] = useState<number | null>(null);
+  const [focusCollectionId, setFocusCollectionId] = useState<number | null>(bootUrl.collection);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [scanOpen, setScanOpen] = useState(false);
   const [scanKind, setScanKind] = useState<"movie" | "tv">("movie");
@@ -141,10 +154,10 @@ export function App() {
   const [librariesLoading, setLibrariesLoading] = useState(false);
   const [viewMode, setViewMode] = useState<"poster" | "list">("poster");
   const [posterSize, setPosterSize] = useState(initialPosterSize);
-  const [moviePage, setMoviePage] = useState(0);
-  const [moviesPerPage, setMoviesPerPage] = useState(25);
-  const [movieSort, setMovieSort] = useState<MovieSort>("year");
-  const [movieSortDirection, setMovieSortDirection] = useState<"asc" | "desc">("asc");
+  const [moviePage, setMoviePage] = useState(bootUrl.page);
+  const [moviesPerPage, setMoviesPerPage] = useState(bootUrl.perPage);
+  const [movieSort, setMovieSort] = useState<MovieSort>(bootUrl.sort);
+  const [movieSortDirection, setMovieSortDirection] = useState<"asc" | "desc">(bootUrl.dir);
   const [scanError, setScanError] = useState("");
   const searchAreaRef = useRef<HTMLDivElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
@@ -189,6 +202,77 @@ export function App() {
     void bootstrap();
   }, []);
 
+  // --- URL <-> state sync ---------------------------------------------------------------------
+  // The current navigable state, assembled from the live React state for serialization.
+  function currentUrlState(): UrlState {
+    return {
+      view: activeView,
+      kind: mediaKind,
+      type,
+      q: query,
+      page: moviePage,
+      perPage: moviesPerPage,
+      sort: movieSort,
+      dir: movieSortDirection,
+      tvSource,
+      tvQ: tvSubmittedQuery,
+      tvPage,
+      tvPerPage,
+      collection: focusCollectionId
+    };
+  }
+
+  // Write the URL from the current state merged with `overrides` (pass the NEW values you just set,
+  // since the state setters above haven't flushed yet). pushState for navigation, replaceState for
+  // minor within-search tweaks. No-ops when the URL is unchanged, which prevents update loops.
+  function writeUrl(overrides: Partial<UrlState>, opts: { replace?: boolean } = {}) {
+    const search = buildSearchString({ ...currentUrlState(), ...overrides });
+    if (search === window.location.search) return;
+    if (opts.replace) window.history.replaceState(null, "", search);
+    else window.history.pushState(null, "", search);
+  }
+
+  // Apply a parsed URL state to React state (used on mount and on Back/Forward). Re-fetches movie
+  // results from the inputs; TV results re-fetch inside TvSearchView when its props change.
+  function applyUrlState(state: UrlState, opts: { fetch?: boolean } = {}) {
+    setActiveView(state.view);
+    setMediaKind(state.kind);
+    setType(state.type);
+    setQuery(state.q);
+    setMoviePage(state.page);
+    setMoviesPerPage(state.perPage);
+    setMovieSort(state.sort);
+    setMovieSortDirection(state.dir);
+    setFocusCollectionId(state.collection);
+    setTvSource(state.tvSource);
+    setTvSubmittedQuery(state.tvQ);
+    setTvPage(state.tvPage);
+    setTvPerPage(state.tvPerPage);
+    if (opts.fetch && state.view === "search" && state.kind === "movie") {
+      if (isTraktSource(state.type)) void loadTraktResults(state.type);
+      else if (state.q.trim()) void executeMovieSearch(state.q, state.type);
+      else setSearchResponse({ query: "", results: [] });
+    }
+  }
+
+  // On mount: re-run the search described by the initial URL (results aren't stored in the URL).
+  useEffect(() => {
+    if (bootUrl.view === "search" && bootUrl.kind === "movie") {
+      if (isTraktSource(bootUrl.type)) void loadTraktResults(bootUrl.type);
+      else if (bootUrl.q.trim()) void executeMovieSearch(bootUrl.q, bootUrl.type);
+    }
+    // TV mounts TvSearchView which fetches from its props; Collections loads itself.
+  }, []);
+
+  // Back/Forward: re-read the URL and restore state + re-fetch.
+  useEffect(() => {
+    function onPopState() {
+      applyUrlState(parseUrlState(window.location.search, readStoredMediaKind()), { fetch: true });
+    }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
   useEffect(() => {
     document.documentElement.dataset.theme = settings.themeMode;
   }, [settings.themeMode]);
@@ -202,19 +286,17 @@ export function App() {
     }
   }, [mediaKind]);
 
-  useEffect(() => {
-    setMoviePage(0);
-  }, [moviesPerPage, movieSort, movieSortDirection, searchResponse.results]);
-
   // If Trakt disconnects while a Trakt source is selected, fall back to a normal search type
-  // so the dropdown and results don't reference an option that's no longer available.
+  // so the dropdown and results don't reference an option that's no longer available. Gated on
+  // traktLoaded so a deep-linked Trakt URL isn't reset before the connection status is known.
   useEffect(() => {
-    if (!traktConnected && isTraktSource(type)) {
+    if (traktLoaded && !traktConnected && isTraktSource(type)) {
       setType("person");
       setSearchResponse({ query: "", results: [] });
       setQuery("");
+      writeUrl({ type: "person", q: "" }, { replace: true });
     }
-  }, [traktConnected, type]);
+  }, [traktLoaded, traktConnected, type]);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -263,7 +345,11 @@ export function App() {
 
   async function bootstrap() {
     void api.meta().then(setApiMeta).catch(() => setApiMeta(null));
-    void api.traktStatus().then((status) => setTraktConnected(status.connected)).catch(() => setTraktConnected(false));
+    void api
+      .traktStatus()
+      .then((status) => setTraktConnected(status.connected))
+      .catch(() => setTraktConnected(false))
+      .finally(() => setTraktLoaded(true));
     void api.tvStats().then(setTvStats).catch(() => setTvStats(EMPTY_TV_STATS));
     void loadCollections();
     try {
@@ -321,18 +407,16 @@ export function App() {
       void loadCollections();
       if (loadedStats.movieCount > 0) {
         setMessage(`Switched to ${nextServerName}. Loaded ${loadedStats.movieCount.toLocaleString()} saved ${nextServerName} movies.`);
+        // Re-run the same search/inputs against the new server (inputs unchanged → no URL change).
         if (isTraktSource(previousType)) {
-          // Re-overlay the same Trakt list against the newly active server's owned/missing state.
-          await loadTraktSource(previousType);
+          await loadTraktResults(previousType);
         } else if (previousSearch) {
-          setLoading(true);
-          const response = await api.search(previousSearch, previousType);
-          setSearchResponse(response);
-          setQuery(previousSearch);
-          setType(previousType);
+          await executeMovieSearch(previousSearch, previousType);
         }
+        writeUrl({ page: 0 }, { replace: true });
       } else {
         setQuery("");
+        writeUrl({ q: "", page: 0 }, { replace: true });
         setMessage(`Switched to ${nextServerName}. Scan your ${nextServerName} movie library to begin.`);
       }
     } catch (error) {
@@ -405,20 +489,24 @@ export function App() {
     }
   }
 
-  async function runSearch(searchQuery: string, searchType: SearchType) {
+  // Pure fetch of a TMDb search (no URL writes, no input-state changes) — used by the navigate
+  // wrapper, the on-mount restore, popstate, and the server-switch re-search.
+  async function executeMovieSearch(searchQuery: string, searchType: SearchType) {
     if (isTraktSource(searchType)) {
-      await loadTraktSource(searchType);
+      await loadTraktResults(searchType);
       return;
     }
-    if (!searchQuery.trim()) return;
-    setQuery(searchQuery);
-    setType(searchType);
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      setSearchResponse({ query: "", results: [] });
+      return;
+    }
     setSuggestionsOpen(false);
     setSuggestions([]);
     setLoading(true);
     setMessage("");
     try {
-      const response = await api.search(searchQuery.trim(), searchType as TmdbSearchType);
+      const response = await api.search(trimmed, searchType as TmdbSearchType);
       setSearchResponse(response);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Search failed.");
@@ -427,10 +515,9 @@ export function App() {
     }
   }
 
-  // Load a Trakt watchlist/watched list into the shared results grid (a user action — not on
-  // every render). Owned/missing overlay and the Search/Seerr handoffs come for free via reuse.
-  async function loadTraktSource(source: TraktSource) {
-    setType(source);
+  // Load a Trakt watchlist/watched list into the shared results grid. Owned/missing overlay and the
+  // Search/Seerr handoffs come for free via reuse.
+  async function loadTraktResults(source: TraktSource) {
     setSuggestionsOpen(false);
     setSuggestions([]);
     setLoading(true);
@@ -439,20 +526,66 @@ export function App() {
       const kind = source === "trakt-watched" ? "watched" : "watchlist";
       const response = await api.traktList(kind);
       setSearchResponse(response);
-      setQuery("");
       if (!response.results.length) {
         setMessage(`No movies found in your ${TRAKT_SOURCE_LABELS[source]}.`);
       }
     } catch (error) {
+      setSearchResponse({ query: "", results: [] });
       setMessage(error instanceof Error ? error.message : "Could not load your Trakt list.");
     } finally {
       setLoading(false);
     }
   }
 
+  // A new movie search (user action): set inputs, push history, reset to page 1, then fetch.
+  function navigateMovieSearch(searchQuery: string, searchType: SearchType) {
+    const trakt = isTraktSource(searchType);
+    const nextQuery = trakt ? "" : searchQuery;
+    setActiveView("search");
+    setMediaKind("movie");
+    setType(searchType);
+    setQuery(nextQuery);
+    setMoviePage(0);
+    writeUrl({ view: "search", kind: "movie", type: searchType, q: trakt ? "" : searchQuery.trim(), page: 0 });
+    void executeMovieSearch(searchQuery, searchType);
+  }
+
+  // A new TV search (from TvSearchView): update the lifted TV inputs + URL; TvSearchView re-fetches
+  // when its props change. `replace` for input-only changes (e.g. a source switch with no query yet).
+  function navigateTvSearch(source: TvSourceKey, tvQuery: string, opts: { replace?: boolean } = {}) {
+    const trakt = source === "trakt-watchlist" || source === "trakt-watched";
+    const nextQuery = trakt ? "" : tvQuery.trim();
+    setTvSource(source);
+    setTvSubmittedQuery(nextQuery);
+    setTvPage(0);
+    writeUrl({ view: "search", kind: "tv", tvSource: source, tvQ: nextQuery, tvPage: 0 }, opts);
+  }
+
   async function search(event?: React.FormEvent) {
     event?.preventDefault();
-    await runSearch(query, type);
+    navigateMovieSearch(query, type);
+  }
+
+  // Within-search movie controls — minor changes use replaceState so Back doesn't step through every
+  // page/sort tick. Page resets to the first page when the result set changes (sort/perPage).
+  function handleMoviePage(nextPage: number) {
+    setMoviePage(nextPage);
+    writeUrl({ page: nextPage }, { replace: true });
+  }
+  function handleMoviesPerPage(nextPerPage: number) {
+    setMoviesPerPage(nextPerPage);
+    setMoviePage(0);
+    writeUrl({ perPage: nextPerPage, page: 0 }, { replace: true });
+  }
+  function handleMovieSort(nextSort: MovieSort) {
+    setMovieSort(nextSort);
+    setMoviePage(0);
+    writeUrl({ sort: nextSort, page: 0 }, { replace: true });
+  }
+  function handleMovieDirection(nextDir: "asc" | "desc") {
+    setMovieSortDirection(nextDir);
+    setMoviePage(0);
+    writeUrl({ dir: nextDir, page: 0 }, { replace: true });
   }
 
   function closeMobileNav() {
@@ -508,14 +641,14 @@ export function App() {
 
   function searchPersonFromDetails(name: string) {
     closeMovieDetails();
-    setActiveView("search");
-    void runSearch(name, "person");
+    navigateMovieSearch(name, "person");
   }
 
   function openCollectionFromDetails(collectionId: number) {
     closeMovieDetails();
     setActiveView("collections");
     setFocusCollectionId(collectionId);
+    writeUrl({ view: "collections", collection: collectionId });
   }
 
   return (
@@ -540,6 +673,7 @@ export function App() {
               className={activeView === "search" ? "ghost-button selected" : "ghost-button"}
               onClick={() => {
                 setActiveView("search");
+                writeUrl({ view: "search" });
                 closeMobileNav();
               }}
             >
@@ -550,6 +684,7 @@ export function App() {
               className={activeView === "collections" ? "ghost-button selected" : "ghost-button"}
               onClick={() => {
                 setActiveView("collections");
+                writeUrl({ view: "collections" });
                 closeMobileNav();
               }}
             >
@@ -669,6 +804,7 @@ export function App() {
               onClick={() => {
                 setMediaKind("movie");
                 setMessage("");
+                writeUrl({ view: "search", kind: "movie" });
               }}
             >
               <Film size={16} />
@@ -679,6 +815,7 @@ export function App() {
               onClick={() => {
                 setMediaKind("tv");
                 setMessage("");
+                writeUrl({ view: "search", kind: "tv" });
               }}
             >
               <Tv size={16} />
@@ -700,6 +837,21 @@ export function App() {
                 nzbEnabled={nzbEnabled}
                 onNzbSearch={openTvNzbSearch}
                 traktConnected={traktConnected}
+                traktReady={traktLoaded}
+                source={tvSource}
+                submittedQuery={tvSubmittedQuery}
+                page={tvPage}
+                perPage={tvPerPage}
+                onNavigate={(next, opts) => navigateTvSearch(next.source, next.query, opts)}
+                onPageChange={(nextPage) => {
+                  setTvPage(nextPage);
+                  writeUrl({ tvPage: nextPage }, { replace: true });
+                }}
+                onPerPageChange={(nextPerPage) => {
+                  setTvPerPage(nextPerPage);
+                  setTvPage(0);
+                  writeUrl({ tvPerPage: nextPerPage, tvPage: 0 }, { replace: true });
+                }}
               />
             </>
           ) : (
@@ -710,11 +862,12 @@ export function App() {
                 value={type}
                 onChange={(event) => {
                   const nextType = event.target.value as SearchType;
-                  setType(nextType);
                   if (isTraktSource(nextType)) {
-                    void loadTraktSource(nextType);
+                    navigateMovieSearch("", nextType);
                   } else {
+                    setType(nextType);
                     setSuggestionsOpen(true);
+                    writeUrl({ type: nextType }, { replace: true });
                   }
                 }}
               >
@@ -757,7 +910,7 @@ export function App() {
                   <button
                     className="suggestion-row"
                     key={`${suggestion.type}-${suggestion.id}`}
-                    onClick={() => void runSearch(suggestion.title, suggestion.type)}
+                    onClick={() => navigateMovieSearch(suggestion.title, suggestion.type)}
                   >
                     <div className="suggestion-image">
                       {suggestion.imagePath ? <img src={suggestion.imagePath} alt="" /> : <Film size={22} />}
@@ -776,6 +929,8 @@ export function App() {
 
           {searchResponse.person ? <PersonResultHeader person={searchResponse.person} /> : null}
 
+          <div ref={moviesResultsRef} className="results-anchor" />
+
           <ResultControls
             total={sortedMovies.length}
             pageStart={moviePageStart}
@@ -787,10 +942,11 @@ export function App() {
             sort={movieSort}
             direction={movieSortDirection}
             sortOptions={MOVIE_SORT_OPTIONS}
-            onPerPage={setMoviesPerPage}
-            onSort={setMovieSort}
-            onDirection={setMovieSortDirection}
-            onPage={setMoviePage}
+            scrollTargetRef={moviesResultsRef}
+            onPerPage={handleMoviesPerPage}
+            onSort={handleMovieSort}
+            onDirection={handleMovieDirection}
+            onPage={handleMoviePage}
           />
 
           <MovieGrid
@@ -814,10 +970,11 @@ export function App() {
             sort={movieSort}
             direction={movieSortDirection}
             sortOptions={MOVIE_SORT_OPTIONS}
-            onPerPage={setMoviesPerPage}
-            onSort={setMovieSort}
-            onDirection={setMovieSortDirection}
-            onPage={setMoviePage}
+            scrollTargetRef={moviesResultsRef}
+            onPerPage={handleMoviesPerPage}
+            onSort={handleMovieSort}
+            onDirection={handleMovieDirection}
+            onPage={handleMoviePage}
             compact
           />
           </>
@@ -1006,6 +1163,7 @@ export function App() {
         <span>{apiMeta ? `API ${formatMeta(apiMeta)}` : "API not detected"}</span>
       </footer>
       <DownloadStatusBar enabled={settings.downloaderType !== "none" && Boolean(settings.downloaderBaseUrl)} onOpenTracker={() => setTrackerOpen(true)} />
+      <ScrollToTopButton />
     </main>
   );
 }

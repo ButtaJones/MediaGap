@@ -8,6 +8,8 @@ import { ResultControls } from "./ResultControls";
 import { TvShowGrid } from "./TvShowGrid";
 import { TvShowDetailModal } from "./TvShowDetailModal";
 
+type TvSource = "show" | "person" | TraktSource;
+
 interface TvSearchViewProps {
   posterSize: number;
   viewMode: "poster" | "list";
@@ -17,9 +19,16 @@ interface TvSearchViewProps {
   nzbEnabled: boolean;
   onNzbSearch: (target: TvNzbTarget) => void;
   traktConnected: boolean;
+  traktReady: boolean;
+  // URL-driven navigable state (owned by App so it round-trips through the URL).
+  source: TvSource;
+  submittedQuery: string;
+  page: number;
+  perPage: number;
+  onNavigate: (next: { source: TvSource; query: string }, opts?: { replace?: boolean }) => void;
+  onPageChange: (page: number) => void;
+  onPerPageChange: (perPage: number) => void;
 }
-
-type TvSource = "show" | "person" | TraktSource;
 
 function isTraktSource(source: TvSource): source is TraktSource {
   return source === "trakt-watchlist" || source === "trakt-watched";
@@ -33,19 +42,33 @@ interface DisplaySuggestion {
   imagePath: string | null;
 }
 
-// Dedicated TV search surface: TV-title search with as-you-type suggestions, a Person source (an
-// actor's TV work), Trakt watchlist/watched, an ownership-aware grid, and the drill-down modal with
-// Seerr/NZB actions. Mirrors the movie search's source select + suggestions + person header.
-export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seerrEnabled, nzbEnabled, onNzbSearch, traktConnected }: TvSearchViewProps) {
-  const [query, setQuery] = useState("");
-  const [submitted, setSubmitted] = useState("");
-  const [source, setSource] = useState<TvSource>("show");
+// Dedicated TV search surface. The navigable inputs (source / searched query / page / perPage) are
+// controlled by App so they live in the URL; results, suggestions and the detail modal stay local
+// and re-fetch whenever the controlled (source, submittedQuery) change.
+export function TvSearchView({
+  posterSize,
+  viewMode,
+  serverName,
+  tmdbReady,
+  seerrEnabled,
+  nzbEnabled,
+  onNzbSearch,
+  traktConnected,
+  traktReady,
+  source,
+  submittedQuery,
+  page,
+  perPage,
+  onNavigate,
+  onPageChange,
+  onPerPageChange
+}: TvSearchViewProps) {
+  const [inputText, setInputText] = useState(submittedQuery);
   const [shows, setShows] = useState<TvShowResult[]>([]);
   const [person, setPerson] = useState<PersonHeader | null>(null);
-  const [page, setPage] = useState(0);
-  const [perPage, setPerPage] = useState(25);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const [selected, setSelected] = useState<TvShowResult | null>(null);
   const [detail, setDetail] = useState<TvShowDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -55,6 +78,7 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const searchAreaRef = useRef<HTMLDivElement | null>(null);
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
+  const resultsAnchorRef = useRef<HTMLDivElement | null>(null);
   const trakt = isTraktSource(source);
   const isPerson = source === "person";
 
@@ -65,24 +89,90 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
   const pageStart = pagedShows.length ? safePage * perPage + 1 : 0;
   const pageEnd = safePage * perPage + pagedShows.length;
 
-  // A new result set (search, source change, or page-size change) returns to the first page.
+  // Keep the input box in sync with the URL-driven searched query (initial load, Back/Forward, a
+  // new search from a suggestion or cast click). Local typing diverges until the next submit.
   useEffect(() => {
-    setPage(0);
-  }, [shows, perPage]);
+    setInputText(submittedQuery);
+  }, [submittedQuery]);
 
-  // If Trakt disconnects while a Trakt source is selected, fall back to the title search.
+  // Re-fetch results whenever the controlled (source, submittedQuery) change — this is the single
+  // path that restores results on load and Back/Forward, and runs a new search. `refreshNonce` lets
+  // the Trakt "Refresh" button re-pull an unchanged source.
   useEffect(() => {
-    if (!traktConnected && isTraktSource(source)) {
-      setSource("show");
-      setShows([]);
-      setSubmitted("");
+    let cancelled = false;
+    async function run() {
+      setSuggestionsOpen(false);
+      setSuggestions([]);
+      if (isTraktSource(source)) {
+        setPerson(null);
+        setLoading(true);
+        setMessage("");
+        try {
+          const response = await api.traktTvList(source === "trakt-watched" ? "watched" : "watchlist");
+          if (cancelled) return;
+          setShows(response.results);
+          if (!response.results.length) setMessage(`No shows found in your ${TRAKT_SOURCE_LABELS[source]}.`);
+        } catch (error) {
+          if (cancelled) return;
+          setShows([]);
+          setMessage(error instanceof Error ? error.message : "Could not load your Trakt list.");
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+        return;
+      }
+      const trimmed = submittedQuery.trim();
+      if (!trimmed) {
+        setShows([]);
+        setPerson(null);
+        setMessage("");
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
       setMessage("");
+      try {
+        if (source === "person") {
+          const response = await api.searchTvPerson(trimmed);
+          if (cancelled) return;
+          setShows(response.results);
+          setPerson(response.person ?? null);
+          if (!response.results.length) {
+            setMessage(response.person ? `No TV work found for ${response.person.name}.` : `No person found for "${trimmed}".`);
+          }
+        } else {
+          const response = await api.searchTv(trimmed);
+          if (cancelled) return;
+          setShows(response.results);
+          setPerson(null);
+          if (!response.results.length) setMessage(`No TV shows found for "${trimmed}".`);
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setShows([]);
+        setPerson(null);
+        setMessage(error instanceof Error ? error.message : "TV search failed.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
-  }, [traktConnected, source]);
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [source, submittedQuery, refreshNonce]);
+
+  // If Trakt disconnects while a Trakt source is selected, fall back to the title search. Gated on
+  // traktReady so a deep-linked Trakt URL isn't reset before the connection status is known.
+  useEffect(() => {
+    if (traktReady && !traktConnected && isTraktSource(source)) {
+      onNavigate({ source: "show", query: "" }, { replace: true });
+    }
+  }, [traktReady, traktConnected, source, onNavigate]);
 
   // Debounced search-as-you-type suggestions (TV shows, or people in Person mode).
   useEffect(() => {
-    const trimmed = query.trim();
+    const trimmed = inputText.trim();
     if (!suggestionsOpen || trimmed.length < 2 || !tmdbReady || trakt) {
       setSuggestions([]);
       setSuggestionsLoading(false);
@@ -126,7 +216,7 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
       cancelled = true;
       window.clearTimeout(handle);
     };
-  }, [query, suggestionsOpen, tmdbReady, trakt, isPerson]);
+  }, [inputText, suggestionsOpen, tmdbReady, trakt, isPerson]);
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
@@ -142,96 +232,18 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
     return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, []);
 
-  async function performSearch(rawQuery: string) {
-    const trimmed = rawQuery.trim();
-    if (!trimmed) return;
-    setSource("show");
-    setQuery(trimmed);
-    setSubmitted(trimmed);
-    setPerson(null);
-    setSuggestionsOpen(false);
-    setSuggestions([]);
-    setLoading(true);
-    setMessage("");
-    try {
-      const response = await api.searchTv(trimmed);
-      setShows(response.results);
-      if (!response.results.length) setMessage(`No TV shows found for "${trimmed}".`);
-    } catch (error) {
-      setShows([]);
-      setMessage(error instanceof Error ? error.message : "TV search failed.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // An actor's/creator's TV work, with ownership overlaid (also how a TV cast click searches).
-  async function performPersonSearch(name: string) {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setSource("person");
-    setQuery(trimmed);
-    setSubmitted(trimmed);
-    setSuggestionsOpen(false);
-    setSuggestions([]);
-    setLoading(true);
-    setMessage("");
-    try {
-      const response = await api.searchTvPerson(trimmed);
-      setShows(response.results);
-      setPerson(response.person ?? null);
-      if (!response.results.length) {
-        setMessage(response.person ? `No TV work found for ${response.person.name}.` : `No person found for "${trimmed}".`);
-      }
-    } catch (error) {
-      setShows([]);
-      setPerson(null);
-      setMessage(error instanceof Error ? error.message : "TV person search failed.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Load the user's Trakt TV watchlist/watched into the same grid, with ownership overlaid.
-  async function loadTraktSource(traktSource: TraktSource) {
-    setSuggestionsOpen(false);
-    setSuggestions([]);
-    setPerson(null);
-    setLoading(true);
-    setMessage("");
-    try {
-      const kind = traktSource === "trakt-watched" ? "watched" : "watchlist";
-      const response = await api.traktTvList(kind);
-      setShows(response.results);
-      setSubmitted(TRAKT_SOURCE_LABELS[traktSource]);
-      if (!response.results.length) setMessage(`No shows found in your ${TRAKT_SOURCE_LABELS[traktSource]}.`);
-    } catch (error) {
-      setShows([]);
-      setMessage(error instanceof Error ? error.message : "Could not load your Trakt list.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
   function onSubmit(event?: React.FormEvent) {
     event?.preventDefault();
-    if (isTraktSource(source)) void loadTraktSource(source);
-    else if (source === "person") void performPersonSearch(query);
-    else void performSearch(query);
+    if (isTraktSource(source)) {
+      setRefreshNonce((nonce) => nonce + 1);
+      return;
+    }
+    onNavigate({ source, query: inputText });
   }
 
   function onSourceChange(next: TvSource) {
-    setSource(next);
-    if (isTraktSource(next)) {
-      void loadTraktSource(next);
-    } else {
-      // "show" or "person": clear the grid and let the user type a new query.
-      setSuggestionsOpen(false);
-      setShows([]);
-      setPerson(null);
-      setSubmitted("");
-      setMessage("");
-    }
+    // Trakt loads immediately (push); show/person just switch the input mode (replace, no query yet).
+    onNavigate({ source: next, query: "" }, { replace: !isTraktSource(next) });
   }
 
   async function openDetail(show: TvShowResult) {
@@ -269,14 +281,14 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
             ) : null}
           </select>
           <input
-            value={trakt ? "" : query}
+            value={trakt ? "" : inputText}
             disabled={!tmdbReady || trakt}
             onChange={(event) => {
-              setQuery(event.target.value);
+              setInputText(event.target.value);
               setSuggestionsOpen(true);
             }}
             onFocus={() => {
-              if (!trakt && query.trim().length >= 2) setSuggestionsOpen(true);
+              if (!trakt && inputText.trim().length >= 2) setSuggestionsOpen(true);
             }}
             placeholder={
               trakt
@@ -292,14 +304,14 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
           </button>
         </form>
 
-        {!trakt && suggestionsOpen && (suggestions.length || suggestionsLoading) && query.trim().length >= 2 ? (
+        {!trakt && suggestionsOpen && (suggestions.length || suggestionsLoading) && inputText.trim().length >= 2 ? (
           <div className="suggestion-list" ref={suggestionsRef}>
             {suggestionsLoading ? <p className="muted-line">{isPerson ? "Looking up people..." : "Looking up shows..."}</p> : null}
             {suggestions.map((suggestion) => (
               <button
                 className="suggestion-row"
                 key={suggestion.id}
-                onClick={() => (isPerson ? void performPersonSearch(suggestion.title) : void performSearch(suggestion.title))}
+                onClick={() => onNavigate({ source, query: suggestion.title })}
               >
                 <div className="suggestion-image">
                   {suggestion.imagePath ? <img src={suggestion.imagePath} alt="" /> : isPerson ? <UserRound size={22} /> : <Tv size={22} />}
@@ -319,6 +331,8 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
 
       {isPerson && person ? <PersonResultHeader person={person} /> : null}
 
+      <div ref={resultsAnchorRef} className="results-anchor" />
+
       <ResultControls
         total={shows.length}
         pageStart={pageStart}
@@ -327,8 +341,9 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
         pageCount={pageCount}
         perPage={perPage}
         perPageLabel="Shows"
-        onPerPage={setPerPage}
-        onPage={setPage}
+        scrollTargetRef={resultsAnchorRef}
+        onPerPage={onPerPageChange}
+        onPage={onPageChange}
       />
 
       <TvShowGrid
@@ -337,9 +352,9 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
         posterSize={posterSize}
         seerrEnabled={seerrEnabled}
         onShowDetails={(show) => void openDetail(show)}
-        emptyTitle={submitted ? "No shows match" : "Search for a TV show"}
+        emptyTitle={submittedQuery || trakt ? "No shows match" : "Search for a TV show"}
         emptyDescription={
-          submitted
+          submittedQuery || trakt
             ? "Try a different title, person, or source."
             : `Find a show, then see which seasons you already have in ${serverName} and which are missing.`
         }
@@ -353,8 +368,9 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
         pageCount={pageCount}
         perPage={perPage}
         perPageLabel="Shows"
-        onPerPage={setPerPage}
-        onPage={setPage}
+        scrollTargetRef={resultsAnchorRef}
+        onPerPage={onPerPageChange}
+        onPage={onPageChange}
         compact
       />
 
@@ -375,7 +391,7 @@ export function TvSearchView({ posterSize, viewMode, serverName, tmdbReady, seer
         onSearchPerson={(name) => {
           // A TV cast click runs a TV person search (the user is in TV context).
           closeDetail();
-          void performPersonSearch(name);
+          onNavigate({ source: "person", query: name });
         }}
         onClose={closeDetail}
       />
